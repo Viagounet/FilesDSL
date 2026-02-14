@@ -46,7 +46,7 @@ FilesDSL language specification:
 6) Built-ins
 - print(...)
 - len(...)
-- Directory(path, recursive=true|false)
+- Directory(path, recursive=true)
 
 7) Directory object API
 - Iterate directly:
@@ -54,13 +54,14 @@ FilesDSL language specification:
   for file in docs:
       print(file)
 
-- files(recursive=true|false) -> list[file]
+- files(recursive=None) -> list[file]
+  Default behavior: recursive uses the directory object's default.
 
 - search(
     pattern,
-    scope="name"|"content"|"both",
+    scope="name",
     in_content=false,
-    recursive=<bool>,
+    recursive=None,
     ignore_case=false
   ) -> list[file]
 
@@ -70,12 +71,15 @@ Notes:
 - scope="name" searches file names/relative paths.
 - scope="content" searches file contents.
 - scope="both" matches either name or content.
+- recursive=None means "use the directory object's recursive setting".
 
 8) File object API
 - read() -> string
   Returns entire file content as one string.
+  Default: pages=None.
 
-- read(pages=[...]) -> list[string]
+- read(pages=None) -> string | list[string]
+  If pages is None: full content string.
   Returns selected pages/chunks.
   Pages are 1-based.
 
@@ -103,14 +107,24 @@ Notes:
   If not detected:
   "No table of contents detected for <file-path>"
 
-9) Practical output expectations
+9) Default values quick list
+- Directory(..., recursive=true)
+- dir.files(recursive=None)
+- dir.search(..., scope="name", in_content=false, recursive=None, ignore_case=false)
+- file.read(pages=None)
+- file.search(..., ignore_case=false)
+- file.contains(..., ignore_case=false)
+- file.snippets(..., max_results=5, context_chars=80, ignore_case=false)
+- file.table(max_items=50)
+
+10) Practical output expectations
 - When reporting findings, include:
   - file path
   - page/chunk numbers
   - concise evidence snippets when available
 - If a query returns no matches, state that explicitly.
 
-10) Valid example script
+11) Valid example script
 docs = Directory("data")
 pdfs = docs.search(".*\\.pdf$", scope="name")
 print("pdf_count:", len(pdfs))

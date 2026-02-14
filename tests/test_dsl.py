@@ -5,10 +5,19 @@ import unittest
 from pathlib import Path
 
 from filesdsl.errors import DSLRuntimeError, DSLSyntaxError
-from filesdsl.interpreter import run_script
+from filesdsl.interpreter import execute_fdsl, run_script
 
 
 class FilesDSLTests(unittest.TestCase):
+    def test_execute_fdsl_from_python_string(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            code = "x = 1\npages = [2:4]\nok = x == 1\n"
+            variables = execute_fdsl(code, cwd=root, sandbox_root=root)
+            self.assertEqual(variables["x"], 1)
+            self.assertEqual(variables["pages"], [2, 3, 4])
+            self.assertTrue(variables["ok"])
+
     def test_range_syntax_in_lists(self) -> None:
         script = "pages = [1, 5:8, 15]\n"
         variables = run_script(script, cwd=Path.cwd(), sandbox_root=Path.cwd())

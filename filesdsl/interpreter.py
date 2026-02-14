@@ -255,3 +255,24 @@ def run_script(
 ) -> dict[str, Any]:
     interpreter = Interpreter(source, cwd=cwd, sandbox_root=sandbox_root)
     return interpreter.run()
+
+
+def execute_fdsl(
+    code: str,
+    *,
+    cwd: str | Path | None = None,
+    sandbox_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Execute FDSL code provided as a Python string.
+
+    Args:
+        code: FDSL source code to execute.
+        cwd: Base directory used to resolve relative paths in Directory(...).
+        sandbox_root: Path boundary for directory access. Defaults to cwd.
+
+    Returns:
+        The final variable environment as a dictionary.
+    """
+    resolved_cwd = Path(cwd).resolve() if cwd is not None else None
+    resolved_sandbox = Path(sandbox_root).resolve() if sandbox_root is not None else None
+    return run_script(code, cwd=resolved_cwd, sandbox_root=resolved_sandbox)

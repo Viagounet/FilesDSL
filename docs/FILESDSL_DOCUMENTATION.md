@@ -58,11 +58,11 @@ Supported operators:
 ### Built-ins
 1. `print(...)`
 2. `len(...)`
-3. `Directory(path, recursive=true|false)`
+3. `Directory(path, recursive=true)`
 
 ## Directory API
 
-### `Directory(path, recursive=true|false)`
+### `Directory(path, recursive=true)`
 Creates a directory object, constrained by sandbox rules.
 
 ### Iteration
@@ -72,10 +72,14 @@ for file in docs:
     print(file)
 ```
 
-### `dir.files(recursive=true|false)`
+### `dir.files(recursive=None)`
 Returns a list of file objects.
 
-### `dir.search(pattern, scope="name"|"content"|"both", in_content=false, recursive=<bool>, ignore_case=false)`
+Defaults:
+1. `recursive=None` means "use the directory object's own recursive setting".
+2. Since `Directory(..., recursive=true)` by default, `files()` is recursive by default.
+
+### `dir.search(pattern, scope="name", in_content=false, recursive=None, ignore_case=false)`
 Returns a list of matching file objects.
 
 Notes:
@@ -84,12 +88,14 @@ Notes:
 3. `scope="name"` checks filename/path only.
 4. `scope="content"` checks file content only.
 5. `scope="both"` checks either.
+6. `recursive=None` means "use the directory object's own recursive setting".
 
 ## File API
 
 ### `file.read(pages=None)`
 1. `read()` returns full content as one string.
 2. `read(pages=[...])` returns a list of selected pages/chunks.
+3. Default is `pages=None`.
 
 Page selection supports inclusive ranges inside list literals:
 ```fdsl
@@ -119,6 +125,16 @@ If no TOC is found:
 ```text
 No table of contents detected for <file-path>
 ```
+
+## Default Values Summary
+1. `Directory(path, recursive=true)`
+2. `dir.files(recursive=None)` where `None` => directory default
+3. `dir.search(pattern, scope="name", in_content=false, recursive=None, ignore_case=false)`
+4. `file.read(pages=None)`
+5. `file.search(pattern, ignore_case=false)`
+6. `file.contains(pattern, ignore_case=false)`
+7. `file.snippets(pattern, max_results=5, context_chars=80, ignore_case=false)`
+8. `file.table(max_items=50)`
 
 ## PDF Handling
 PDF parsing uses `pymupdf` (PyMuPDF):
