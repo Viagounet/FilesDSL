@@ -2,6 +2,10 @@
 FilesDSL is a small domain-specific language for safe directory/file exploration by LLM agents.
 It intentionally exposes only read/search primitives and simple control flow.
 
+## Documentation
+- Full language and runtime reference: `docs/FILESDSL_DOCUMENTATION.md`
+- LLM agent system prompt template: `docs/SYSTEM_PROMPT_EXAMPLE.md`
+
 ## Why this exists
 - Terminal agents can do much more than read files.
 - This DSL narrows capabilities to file discovery and content inspection.
