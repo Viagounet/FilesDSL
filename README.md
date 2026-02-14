@@ -1,2 +1,61 @@
 # FilesDSL
-A simple DSL meant to be used by LLMs to do search on files safely
+FilesDSL is a small domain-specific language for safe directory/file exploration by LLM agents.
+It intentionally exposes only read/search primitives and simple control flow.
+
+## Why this exists
+- Terminal agents can do much more than read files.
+- This DSL narrows capabilities to file discovery and content inspection.
+- Scripts are easy for an LLM to generate and review.
+- PDF extraction is powered by PyMuPDF (`pymupdf`).
+
+## Language features
+- Variables: integers, booleans, strings, lists.
+- Control flow: `for`, `if` / `elif` / `else`.
+- Builtins: `print(...)`, `len(...)`, `Directory(path, recursive=true|false)`.
+- File access primitives:
+  - `file.read()` for full content.
+  - `file.read(pages=[1, 5:8, 15])` for selected pages/chunks.
+  - `file.search("regex")` returns matching page/chunk numbers.
+  - `file.contains("regex")` boolean.
+  - `file.head()`, `file.tail()`.
+  - `file.table()` best-effort TOC extraction as an indented tree string with page numbers.
+    If none is found, it returns: `No table of contents detected for {file}`.
+  - `file.snippets("regex")` returns short excerpts.
+- Directory primitives:
+  - iterate with `for file in Directory("data")`.
+  - `dir.search("regex", scope="name"|"content"|"both")`.
+
+`5:8` inside list literals expands inclusively to `5, 6, 7, 8`.
+
+## Safety model
+- No imports and no arbitrary Python execution.
+- Only the DSL runtime functions are callable.
+- `Directory(...)` is sandboxed to a root path (default: script directory).
+
+## Usage with uv
+```bash
+uv run python -m filesdsl examples/demo.fdsl
+```
+
+Optional custom sandbox root:
+```bash
+uv run python -m filesdsl examples/demo.fdsl --sandbox-root .
+```
+
+## Example script
+```fdsl
+docs = Directory("data")
+pdfs = docs.search(".*\\.pdf$", scope="name")
+print("pdf count:", len(pdfs))
+
+for file in pdfs:
+    if file.contains("transformer", ignore_case=true):
+        pages = file.search("transformer", ignore_case=true)
+        print(file, pages)
+        print(file.read(pages=[1, 2:3]))
+```
+
+## Test
+```bash
+uv run python -m unittest discover -s tests -p "test_*.py"
+```
