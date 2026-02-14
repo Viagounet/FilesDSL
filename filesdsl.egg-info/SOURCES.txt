@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+filesdsl/__init__.py
+filesdsl/__main__.py
+filesdsl/ast_nodes.py
+filesdsl/errors.py
+filesdsl/interpreter.py
+filesdsl/parser.py
+filesdsl/runtime.py
+filesdsl.egg-info/PKG-INFO
+filesdsl.egg-info/SOURCES.txt
+filesdsl.egg-info/dependency_links.txt
+filesdsl.egg-info/entry_points.txt
+filesdsl.egg-info/requires.txt
+filesdsl.egg-info/top_level.txt
+tests/test_dsl.py
