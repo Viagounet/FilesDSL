@@ -19,6 +19,25 @@ Optional sandbox root:
 uv run python -m filesdsl path/to/script.fdsl --sandbox-root .
 ```
 
+## Python Integration
+Use `execute_fdsl(...)` when you run FDSL from Python and want console history.
+
+```python
+from filesdsl import execute_fdsl
+
+code = """
+print("hello")
+print([1, 2, 3])
+"""
+
+history = execute_fdsl(code, cwd=".", sandbox_root=".")
+# history == "hello\n[1, 2, 3]\n"
+```
+
+Default arguments:
+1. `cwd=None` (uses current working directory)
+2. `sandbox_root=None` (defaults to `cwd`)
+
 ## Core Syntax
 
 ### Variables

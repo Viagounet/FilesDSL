@@ -2,7 +2,6 @@
 docs = Directory("../data")
 pdf_files = docs.search(".*\\.pdf$", scope="name")
 print("PDF files:", len(pdf_files))
-
 for file in pdf_files:
     if file.contains("language model", ignore_case=true):
         print("match:", file)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -262,7 +264,7 @@ def execute_fdsl(
     *,
     cwd: str | Path | None = None,
     sandbox_root: str | Path | None = None,
-) -> dict[str, Any]:
+) -> str:
     """Execute FDSL code provided as a Python string.
 
     Args:
@@ -271,8 +273,11 @@ def execute_fdsl(
         sandbox_root: Path boundary for directory access. Defaults to cwd.
 
     Returns:
-        The final variable environment as a dictionary.
+        The execution history captured from stdout (console prints).
     """
     resolved_cwd = Path(cwd).resolve() if cwd is not None else None
     resolved_sandbox = Path(sandbox_root).resolve() if sandbox_root is not None else None
-    return run_script(code, cwd=resolved_cwd, sandbox_root=resolved_sandbox)
+    output = StringIO()
+    with redirect_stdout(output):
+        run_script(code, cwd=resolved_cwd, sandbox_root=resolved_sandbox)
+    return output.getvalue()

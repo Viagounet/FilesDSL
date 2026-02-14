@@ -56,10 +56,11 @@ code = """
 docs = Directory("data")
 files = docs.search(".*\\.pdf$", scope="name")
 count = len(files)
+print(count)
 """
 
-result = execute_fdsl(code, cwd=".", sandbox_root=".")
-print(result["count"])
+history = execute_fdsl(code, cwd=".", sandbox_root=".")
+print(history)  # what the FDSL script printed
 ```
 
 ## Example script

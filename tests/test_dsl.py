@@ -12,11 +12,9 @@ class FilesDSLTests(unittest.TestCase):
     def test_execute_fdsl_from_python_string(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            code = "x = 1\npages = [2:4]\nok = x == 1\n"
-            variables = execute_fdsl(code, cwd=root, sandbox_root=root)
-            self.assertEqual(variables["x"], 1)
-            self.assertEqual(variables["pages"], [2, 3, 4])
-            self.assertTrue(variables["ok"])
+            code = "x = 1\npages = [2:4]\nprint(x)\nprint(pages)\n"
+            output = execute_fdsl(code, cwd=root, sandbox_root=root)
+            self.assertEqual(output, "1\n[2, 3, 4]\n")
 
     def test_range_syntax_in_lists(self) -> None:
         script = "pages = [1, 5:8, 15]\n"
