@@ -55,10 +55,34 @@ count = len(nested)
             recursive_vars = run_script(recursive_script, cwd=root, sandbox_root=root)
             self.assertEqual(recursive_vars["count"], 1)
 
+    def test_file_builtin_direct_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "single.txt").write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+            script = """
+f = File("single.txt")
+has_alpha = f.contains("alpha")
+alpha_pages = f.search("alpha")
+first = f.head()
+"""
+            variables = run_script(script, cwd=root, sandbox_root=root)
+            self.assertTrue(variables["has_alpha"])
+            self.assertEqual(variables["alpha_pages"], [1])
+            self.assertIn("alpha", variables["first"])
+
     def test_sandbox_denies_outside_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             script = "docs = Directory('/')\n"
+            with self.assertRaises(DSLRuntimeError):
+                run_script(script, cwd=root, sandbox_root=root)
+
+    def test_file_builtin_denies_outside_root(self) -> None:
+        with tempfile.TemporaryDirectory() as root_dir, tempfile.TemporaryDirectory() as outside_dir:
+            root = Path(root_dir)
+            outside_file = Path(outside_dir) / "external.txt"
+            outside_file.write_text("outside", encoding="utf-8")
+            script = f"f = File('{outside_file.as_posix()}')\n"
             with self.assertRaises(DSLRuntimeError):
                 run_script(script, cwd=root, sandbox_root=root)
 
@@ -100,12 +124,122 @@ for file in files:
             expected = f"No table of contents detected for {no_toc_file.as_posix()}"
             self.assertEqual(variables["toc"], expected)
 
+    def test_directory_tree_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "top.txt").write_text("x", encoding="utf-8")
+            (root / "nested").mkdir()
+            (root / "nested" / "inside.txt").write_text("y", encoding="utf-8")
+
+            script = """
+docs = Directory(".")
+tree_text = docs.tree(max_depth=3)
+"""
+            variables = run_script(script, cwd=root, sandbox_root=root)
+            tree_text = variables["tree_text"]
+            self.assertIn(f"{root.as_posix()}/", tree_text)
+            self.assertIn("  nested/", tree_text)
+            self.assertIn("    inside.txt", tree_text)
+            self.assertIn("  top.txt", tree_text)
+
+    def test_directory_tree_truncation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for i in range(10):
+                (root / f"file_{i}.txt").write_text("x", encoding="utf-8")
+            script = """
+docs = Directory(".")
+tree_text = docs.tree(max_entries=3)
+"""
+            variables = run_script(script, cwd=root, sandbox_root=root)
+            self.assertIn("truncated after 3 entries", variables["tree_text"])
+
     def test_syntax_error_reports_location(self) -> None:
         script = "for file in Directory('.')\n    print(file)\n"
         with self.assertRaises(DSLSyntaxError) as context:
             run_script(script, cwd=Path.cwd(), sandbox_root=Path.cwd())
         self.assertEqual(context.exception.line, 1)
         self.assertGreaterEqual(context.exception.column, 1)
+
+    def test_docx_file_methods(self) -> None:
+        from docx import Document
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "sample.docx"
+
+            doc = Document()
+            doc.add_heading("Overview", level=1)
+            doc.add_paragraph("alpha signal in overview")
+            doc.add_heading("Details", level=2)
+            doc.add_paragraph("beta signal in details")
+            doc.save(path)
+
+            script = """
+f = File("sample.docx")
+all_text = f.read()
+selected = f.read(pages=[1, 2])
+matches = f.search("alpha")
+has_beta = f.contains("beta")
+first = f.head()
+last = f.tail()
+toc = f.table()
+snips = f.snippets("alpha", max_results=1)
+"""
+            variables = run_script(script, cwd=root, sandbox_root=root)
+
+            self.assertIn("Overview", variables["all_text"])
+            self.assertIsInstance(variables["selected"], list)
+            self.assertEqual(variables["matches"], [1])
+            self.assertTrue(variables["has_beta"])
+            self.assertIn("Overview", variables["first"])
+            self.assertIn("Details", variables["last"])
+            self.assertIn("Overview", variables["toc"])
+            self.assertIn("  Details", variables["toc"])
+            self.assertTrue(variables["snips"])
+            self.assertIn("[page 1]", variables["snips"][0])
+
+    def test_pptx_file_methods(self) -> None:
+        from pptx import Presentation
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            path = root / "sample.pptx"
+
+            presentation = Presentation()
+            slide1 = presentation.slides.add_slide(presentation.slide_layouts[1])
+            slide1.shapes.title.text = "Intro"
+            slide1.shapes.placeholders[1].text = "alpha launch notes"
+
+            slide2 = presentation.slides.add_slide(presentation.slide_layouts[1])
+            slide2.shapes.title.text = "Methods"
+            slide2.shapes.placeholders[1].text = "beta evaluation plan"
+            presentation.save(path)
+
+            script = """
+f = File("sample.pptx")
+all_text = f.read()
+selected = f.read(pages=[2])
+matches = f.search("alpha")
+has_beta = f.contains("beta")
+first = f.head()
+last = f.tail()
+toc = f.table()
+snips = f.snippets("alpha", max_results=1)
+"""
+            variables = run_script(script, cwd=root, sandbox_root=root)
+
+            self.assertIn("Intro", variables["all_text"])
+            self.assertEqual(variables["matches"], [1])
+            self.assertTrue(variables["has_beta"])
+            self.assertIsInstance(variables["selected"], list)
+            self.assertIn("Methods", variables["selected"][0])
+            self.assertIn("Intro", variables["first"])
+            self.assertIn("Methods", variables["last"])
+            self.assertIn("Intro (p.1)", variables["toc"])
+            self.assertIn("Methods (p.2)", variables["toc"])
+            self.assertTrue(variables["snips"])
+            self.assertIn("[page 1]", variables["snips"][0])
 
 
 if __name__ == "__main__":

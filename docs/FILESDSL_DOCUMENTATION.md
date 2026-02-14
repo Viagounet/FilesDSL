@@ -6,6 +6,7 @@ FilesDSL is a constrained language for file exploration by LLM agents. It suppor
 2. Full/chunked document reading.
 3. Regex-based search on file names and file contents.
 4. Basic control flow for analysis scripts.
+5. PDF, DOCX, and PPTX content extraction.
 
 The DSL is intentionally small to reduce agent risk and improve predictability.
 
@@ -78,6 +79,7 @@ Supported operators:
 1. `print(...)`
 2. `len(...)`
 3. `Directory(path, recursive=true)`
+4. `File(path)`
 
 ## Directory API
 
@@ -109,12 +111,32 @@ Notes:
 5. `scope="both"` checks either.
 6. `recursive=None` means "use the directory object's own recursive setting".
 
+### `dir.tree(max_depth=5, max_entries=500) -> string`
+Returns an indented textual tree of directories/files rooted at this directory.
+
+Notes:
+1. Directories are suffixed with `/`.
+2. `max_depth=0` returns only the root line.
+3. If entry count exceeds `max_entries`, output ends with:
+   `... truncated after <max_entries> entries`
+
 ## File API
+
+### `File(path)`
+Creates a file object directly without iterating or searching a directory.
+
+Example:
+```fdsl
+report = File("data/office_samples/project_status_report.docx")
+print(report.head())
+```
 
 ### `file.read(pages=None)`
 1. `read()` returns full content as one string.
 2. `read(pages=[...])` returns a list of selected pages/chunks.
 3. Default is `pages=None`.
+4. On PPTX, each slide maps to one chunk/page.
+5. On DOCX, chunks are section-like groups based on headings/content.
 
 Page selection supports inclusive ranges inside list literals:
 ```fdsl
@@ -138,7 +160,12 @@ Returns last page/chunk.
 Returns contextual snippets for each regex match.
 
 ### `file.table(max_items=50) -> string`
-Returns an indented table-of-contents tree with page numbers when detected.
+Returns an indented table-of-contents tree with location metadata when available.
+
+Examples of location metadata:
+1. PDF: page numbers, e.g. `(p.12)`
+2. PPTX: slide numbers, e.g. `(p.3)`
+3. DOCX: typically headings only (usually no page numbers)
 
 If no TOC is found:
 ```text
@@ -147,18 +174,29 @@ No table of contents detected for <file-path>
 
 ## Default Values Summary
 1. `Directory(path, recursive=true)`
-2. `dir.files(recursive=None)` where `None` => directory default
-3. `dir.search(pattern, scope="name", in_content=false, recursive=None, ignore_case=false)`
-4. `file.read(pages=None)`
-5. `file.search(pattern, ignore_case=false)`
-6. `file.contains(pattern, ignore_case=false)`
-7. `file.snippets(pattern, max_results=5, context_chars=80, ignore_case=false)`
-8. `file.table(max_items=50)`
+2. `File(path)` (no optional defaults; `path` is required)
+3. `dir.files(recursive=None)` where `None` => directory default
+4. `dir.search(pattern, scope="name", in_content=false, recursive=None, ignore_case=false)`
+5. `dir.tree(max_depth=5, max_entries=500)`
+6. `file.read(pages=None)`
+7. `file.search(pattern, ignore_case=false)`
+8. `file.contains(pattern, ignore_case=false)`
+9. `file.snippets(pattern, max_results=5, context_chars=80, ignore_case=false)`
+10. `file.table(max_items=50)`
 
-## PDF Handling
+## Format Handling
 PDF parsing uses `pymupdf` (PyMuPDF):
 1. Page text extraction for `read/search/contains`.
 2. PDF bookmarks/outlines for high-quality TOC output in `file.table()`.
+
+Word parsing uses `python-docx`:
+1. Paragraph/heading extraction for `read/search/contains`.
+2. Heading styles for TOC extraction in `file.table()`.
+
+PowerPoint parsing uses `python-pptx`:
+1. Slide text extraction for `read/search/contains`.
+2. Slide titles for TOC extraction in `file.table()`.
+3. Slides are treated as page/chunk units.
 
 ## Error Model
 
@@ -194,4 +232,12 @@ for file in matches:
         print("MATCH PAGES:", hit_pages)
         print("FIRST PAGE:")
         print(file.read(pages=[1]))
+
+docx = File("data/office_samples/project_status_report.docx")
+print("DOCX TOC:")
+print(docx.table())
+
+pptx = File("data/office_samples/project_kickoff_deck.pptx")
+print("PPTX SLIDES:")
+print(pptx.table())
 ```

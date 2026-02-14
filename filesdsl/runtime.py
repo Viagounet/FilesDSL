@@ -63,8 +63,13 @@ class DSLFile:
             raise DSLRuntimeError("max_items must be a positive integer")
 
         entries: list[tuple[int, str, int | None]] = []
-        if self.path.suffix.lower() == ".pdf":
+        suffix = self.path.suffix.lower()
+        if suffix == ".pdf":
             entries = self._read_pdf_outline(max_items=max_items)
+        elif suffix == ".docx":
+            entries = self._read_docx_outline(max_items=max_items)
+        elif suffix == ".pptx":
+            entries = self._read_pptx_outline(max_items=max_items)
         if not entries:
             entries = self._extract_toc_entries_from_text(max_items=max_items)
         if not entries:
@@ -122,6 +127,10 @@ class DSLFile:
         suffix = self.path.suffix.lower()
         if suffix == ".pdf":
             chunks = self._read_pdf_pages()
+        elif suffix == ".docx":
+            chunks = self._read_docx_chunks()
+        elif suffix == ".pptx":
+            chunks = self._read_pptx_chunks()
         else:
             chunks = self._read_text_chunks()
         self._chunks_cache = chunks or [""]
@@ -177,6 +186,158 @@ class DSLFile:
                 page = page_candidate if page_candidate >= 1 else None
 
             entries.append((level, title, page))
+            if len(entries) >= max_items:
+                break
+        return entries
+
+    def _read_docx_chunks(self) -> list[str]:
+        try:
+            import docx
+        except ImportError as exc:
+            raise DSLRuntimeError(
+                "python-docx is required to read DOCX files. Install dependency 'python-docx'."
+            ) from exc
+
+        try:
+            doc = docx.Document(str(self.path))
+        except Exception as exc:
+            raise DSLRuntimeError(f"Failed to read DOCX '{self.path.name}': {exc}") from exc
+
+        chunks: list[str] = []
+        current_lines: list[str] = []
+
+        def flush_current() -> None:
+            if not current_lines:
+                return
+            chunk = "\n".join(current_lines).strip()
+            if chunk:
+                chunks.append(chunk)
+            current_lines.clear()
+
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            if not text:
+                continue
+            style_name = (para.style.name if para.style else "") or ""
+            style_lower = style_name.lower()
+            if style_lower.startswith("heading"):
+                flush_current()
+                current_lines.append(text)
+                continue
+            current_lines.append(text)
+
+        for table in doc.tables:
+            rows: list[str] = []
+            for row in table.rows:
+                cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                if cells:
+                    rows.append(" | ".join(cells))
+            if rows:
+                flush_current()
+                chunks.append("\n".join(rows))
+
+        flush_current()
+        return chunks or [""]
+
+    def _read_docx_outline(self, max_items: int) -> list[tuple[int, str, int | None]]:
+        try:
+            import docx
+        except ImportError as exc:
+            raise DSLRuntimeError(
+                "python-docx is required to read DOCX files. Install dependency 'python-docx'."
+            ) from exc
+
+        try:
+            doc = docx.Document(str(self.path))
+        except Exception as exc:
+            raise DSLRuntimeError(f"Failed to read DOCX outline '{self.path.name}': {exc}") from exc
+
+        entries: list[tuple[int, str, int | None]] = []
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            if not text:
+                continue
+            style_name = (para.style.name if para.style else "") or ""
+            match = re.match(r"heading\s+(\d+)", style_name.strip().lower())
+            if not match:
+                continue
+            level = max(1, int(match.group(1)))
+            entries.append((level, text, None))
+            if len(entries) >= max_items:
+                break
+        return entries
+
+    def _read_pptx_chunks(self) -> list[str]:
+        try:
+            from pptx import Presentation
+        except ImportError as exc:
+            raise DSLRuntimeError(
+                "python-pptx is required to read PPTX files. Install dependency 'python-pptx'."
+            ) from exc
+
+        try:
+            presentation = Presentation(str(self.path))
+        except Exception as exc:
+            raise DSLRuntimeError(f"Failed to read PPTX '{self.path.name}': {exc}") from exc
+
+        chunks: list[str] = []
+        for index, slide in enumerate(presentation.slides, start=1):
+            lines: list[str] = []
+            for shape in slide.shapes:
+                if not hasattr(shape, "has_text_frame") or not shape.has_text_frame:
+                    continue
+                text = shape.text.strip()
+                if not text:
+                    continue
+                for line in text.splitlines():
+                    stripped = line.strip()
+                    if stripped:
+                        lines.append(stripped)
+
+            if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
+                notes_text = slide.notes_slide.notes_text_frame.text.strip()
+                if notes_text:
+                    lines.append("[Notes]")
+                    for line in notes_text.splitlines():
+                        stripped = line.strip()
+                        if stripped:
+                            lines.append(stripped)
+
+            if not lines:
+                lines.append(f"[Slide {index}]")
+            chunks.append("\n".join(lines))
+        return chunks or [""]
+
+    def _read_pptx_outline(self, max_items: int) -> list[tuple[int, str, int | None]]:
+        try:
+            from pptx import Presentation
+        except ImportError as exc:
+            raise DSLRuntimeError(
+                "python-pptx is required to read PPTX files. Install dependency 'python-pptx'."
+            ) from exc
+
+        try:
+            presentation = Presentation(str(self.path))
+        except Exception as exc:
+            raise DSLRuntimeError(f"Failed to read PPTX outline '{self.path.name}': {exc}") from exc
+
+        entries: list[tuple[int, str, int | None]] = []
+        for index, slide in enumerate(presentation.slides, start=1):
+            title = ""
+            if slide.shapes.title and slide.shapes.title.text:
+                title = slide.shapes.title.text.strip()
+            if not title:
+                for shape in slide.shapes:
+                    if not hasattr(shape, "has_text_frame") or not shape.has_text_frame:
+                        continue
+                    text = shape.text.strip()
+                    if text:
+                        title = text.splitlines()[0].strip()
+                        break
+            if not title:
+                title = f"Slide {index}"
+
+            entries.append((1, title, index))
             if len(entries) >= max_items:
                 break
         return entries
@@ -274,6 +435,49 @@ class DSLDirectory:
         if recursive is None:
             recursive = self.recursive
         return [DSLFile(path) for path in self._iter_file_paths(recursive)]
+
+    def tree(self, max_depth: int = 5, max_entries: int = 500) -> str:
+        if not isinstance(max_depth, int) or max_depth < 0:
+            raise DSLRuntimeError("max_depth must be a non-negative integer")
+        if not isinstance(max_entries, int) or max_entries < 1:
+            raise DSLRuntimeError("max_entries must be a positive integer")
+
+        lines: list[str] = [f"{self.path.as_posix()}/"]
+        emitted = 1
+        truncated = False
+
+        def walk(current: Path, depth: int) -> bool:
+            nonlocal emitted, truncated
+            if depth >= max_depth:
+                return True
+
+            try:
+                entries = sorted(
+                    list(current.iterdir()),
+                    key=lambda p: (not p.is_dir(), p.name.lower()),
+                )
+            except OSError as exc:
+                lines.append(f"{'  ' * (depth + 1)}[unreadable: {exc}]")
+                emitted += 1
+                return emitted < max_entries
+
+            for entry in entries:
+                if emitted >= max_entries:
+                    truncated = True
+                    return False
+                label = f"{entry.name}/" if entry.is_dir() else entry.name
+                lines.append(f"{'  ' * (depth + 1)}{label}")
+                emitted += 1
+                if entry.is_dir():
+                    keep_going = walk(entry, depth + 1)
+                    if not keep_going:
+                        return False
+            return True
+
+        walk(self.path, 0)
+        if truncated:
+            lines.append(f"... truncated after {max_entries} entries")
+        return "\n".join(lines)
 
     def search(
         self,

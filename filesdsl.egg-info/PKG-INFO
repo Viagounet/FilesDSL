@@ -5,6 +5,8 @@ Summary: A safe file-exploration DSL for LLM agents
 Requires-Python: >=3.13
 Description-Content-Type: text/markdown
 Requires-Dist: pymupdf>=1.26.4
+Requires-Dist: python-docx>=1.2.0
+Requires-Dist: python-pptx>=1.0.2
 
 # FilesDSL
 FilesDSL is a small domain-specific language for safe directory/file exploration by LLM agents.
@@ -23,8 +25,9 @@ It intentionally exposes only read/search primitives and simple control flow.
 ## Language features
 - Variables: integers, booleans, strings, lists.
 - Control flow: `for`, `if` / `elif` / `else`.
-- Builtins: `print(...)`, `len(...)`, `Directory(path, recursive=true|false)`.
+- Builtins: `print(...)`, `len(...)`, `Directory(path, recursive=true|false)`, `File(path)`.
 - File access primitives:
+  - `file = File("path/to/file.ext")` for direct file access.
   - `file.read()` for full content.
   - `file.read(pages=[1, 5:8, 15])` for selected pages/chunks.
   - `file.search("regex")` returns matching page/chunk numbers.
@@ -35,6 +38,7 @@ It intentionally exposes only read/search primitives and simple control flow.
   - `file.snippets("regex")` returns short excerpts.
 - Directory primitives:
   - iterate with `for file in Directory("data")`.
+  - `dir.tree(max_depth=5, max_entries=500)` for a quick structure overview.
   - `dir.search("regex", scope="name"|"content"|"both")`.
 
 `5:8` inside list literals expands inclusively to `5, 6, 7, 8`.
@@ -64,10 +68,11 @@ code = """
 docs = Directory("data")
 files = docs.search(".*\\.pdf$", scope="name")
 count = len(files)
+print(count)
 """
 
-result = execute_fdsl(code, cwd=".", sandbox_root=".")
-print(result["count"])
+history = execute_fdsl(code, cwd=".", sandbox_root=".")
+print(history)  # what the FDSL script printed
 ```
 
 ## Example script

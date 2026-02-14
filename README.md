@@ -11,12 +11,14 @@ It intentionally exposes only read/search primitives and simple control flow.
 - This DSL narrows capabilities to file discovery and content inspection.
 - Scripts are easy for an LLM to generate and review.
 - PDF extraction is powered by PyMuPDF (`pymupdf`).
+- Office parsing is supported for Word (`.docx`) and PowerPoint (`.pptx`).
 
 ## Language features
 - Variables: integers, booleans, strings, lists.
 - Control flow: `for`, `if` / `elif` / `else`.
-- Builtins: `print(...)`, `len(...)`, `Directory(path, recursive=true|false)`.
+- Builtins: `print(...)`, `len(...)`, `Directory(path, recursive=true|false)`, `File(path)`.
 - File access primitives:
+  - `file = File("path/to/file.ext")` for direct file access.
   - `file.read()` for full content.
   - `file.read(pages=[1, 5:8, 15])` for selected pages/chunks.
   - `file.search("regex")` returns matching page/chunk numbers.
@@ -25,8 +27,11 @@ It intentionally exposes only read/search primitives and simple control flow.
   - `file.table()` best-effort TOC extraction as an indented tree string with page numbers.
     If none is found, it returns: `No table of contents detected for {file}`.
   - `file.snippets("regex")` returns short excerpts.
+
+`file` methods work across PDF, DOCX, PPTX, and plain-text files.
 - Directory primitives:
   - iterate with `for file in Directory("data")`.
+  - `dir.tree(max_depth=5, max_entries=500)` for a quick structure overview.
   - `dir.search("regex", scope="name"|"content"|"both")`.
 
 `5:8` inside list literals expands inclusively to `5, 6, 7, 8`.

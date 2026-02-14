@@ -24,7 +24,7 @@ from .ast_nodes import (
 )
 from .errors import DSLRuntimeError, SourceLocation
 from .parser import Parser
-from .runtime import DSLDirectory
+from .runtime import DSLDirectory, DSLFile
 
 
 class Interpreter:
@@ -42,6 +42,7 @@ class Interpreter:
         self.variables: dict[str, Any] = {}
         self.builtins = {
             "Directory": self._builtin_directory,
+            "File": self._builtin_file,
             "print": self._builtin_print,
             "len": len,
         }
@@ -204,24 +205,33 @@ class Interpreter:
         return values
 
     def _builtin_directory(self, path: str, recursive: bool = True):
-        if not isinstance(path, str):
-            raise DSLRuntimeError("Directory(path) expects a string path")
+        candidate = self._resolve_sandboxed_path(path, "Directory")
         if not isinstance(recursive, bool):
             raise DSLRuntimeError("Directory(..., recursive=...) expects a boolean")
+        return DSLDirectory(candidate, recursive=recursive)
 
+    def _builtin_file(self, path: str):
+        candidate = self._resolve_sandboxed_path(path, "File")
+        if not candidate.exists():
+            raise DSLRuntimeError(f"File does not exist: {candidate.as_posix()}")
+        if not candidate.is_file():
+            raise DSLRuntimeError(f"Path is not a file: {candidate.as_posix()}")
+        return DSLFile(candidate)
+
+    def _resolve_sandboxed_path(self, path: str, ctor_name: str) -> Path:
+        if not isinstance(path, str):
+            raise DSLRuntimeError(f"{ctor_name}(path) expects a string path")
         candidate = Path(path)
         if not candidate.is_absolute():
             candidate = (self.cwd / candidate).resolve()
         else:
             candidate = candidate.resolve()
-
         if not candidate.is_relative_to(self.sandbox_root):
             raise DSLRuntimeError(
                 f"Access denied. '{candidate.as_posix()}' is outside sandbox root "
                 f"'{self.sandbox_root.as_posix()}'"
             )
-
-        return DSLDirectory(candidate, recursive=recursive)
+        return candidate
 
     def _builtin_print(self, *args) -> None:
         rendered = [self._render_value(arg) for arg in args]
