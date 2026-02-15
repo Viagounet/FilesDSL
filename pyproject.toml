@@ -7,7 +7,7 @@ name = "filesdsl"
 version = "0.1.0"
 description = "A safe file-exploration DSL for LLM agents"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "pymupdf>=1.26.4",
     "python-docx>=1.2.0",
