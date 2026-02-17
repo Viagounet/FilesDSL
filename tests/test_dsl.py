@@ -21,6 +21,18 @@ class FilesDSLTests(unittest.TestCase):
         variables = run_script(script, cwd=Path.cwd(), sandbox_root=Path.cwd())
         self.assertEqual(variables["pages"], [1, 5, 6, 7, 8, 15])
 
+    def test_multiline_list_literal(self) -> None:
+        script = """
+terms = [
+    "a",
+    "b",
+    "c",
+    "d",
+]
+"""
+        variables = run_script(script, cwd=Path.cwd(), sandbox_root=Path.cwd())
+        self.assertEqual(variables["terms"], ["a", "b", "c", "d"])
+
     def test_directory_search_and_file_api(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -54,6 +66,25 @@ count = len(nested)
 """
             recursive_vars = run_script(recursive_script, cwd=root, sandbox_root=root)
             self.assertEqual(recursive_vars["count"], 1)
+
+    def test_len_directory_returns_file_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "a.txt").write_text("a", encoding="utf-8")
+            (root / "b.txt").write_text("b", encoding="utf-8")
+            (root / "nested").mkdir()
+            (root / "nested" / "c.txt").write_text("c", encoding="utf-8")
+
+            script = """
+docs = Directory(".")
+count_recursive = len(docs)
+count_flat = len(Directory(".", recursive=false))
+"""
+            variables = run_script(script, cwd=root, sandbox_root=root)
+            self.assertIsInstance(variables["count_recursive"], int)
+            self.assertIsInstance(variables["count_flat"], int)
+            self.assertEqual(variables["count_recursive"], 3)
+            self.assertEqual(variables["count_flat"], 2)
 
     def test_file_builtin_direct_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

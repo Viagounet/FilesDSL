@@ -467,15 +467,65 @@ class Parser:
                     indent + 1,
                 )
             if rhs == "":
-                self._raise("Missing expression on right side of assignment", line_no, indent + assign_index + 2)
+                self._raise(
+                    "Missing expression on right side of assignment",
+                    line_no,
+                    indent + assign_index + 2,
+                )
             expr_col = indent + text.index(rhs) + 1
-            expr = self._parse_expression(rhs, line_no, expr_col)
-            self.index += 1
+            rhs_full, consumed = self._collect_continued_expression(rhs, line_no)
+            expr = self._parse_expression(rhs_full, line_no, expr_col)
+            self.index += consumed
             return Assign(lhs, expr, SourceLocation(line_no, indent + 1))
 
-        expr = self._parse_expression(text, line_no, indent + 1)
-        self.index += 1
+        expr_text, consumed = self._collect_continued_expression(text, line_no)
+        expr = self._parse_expression(expr_text, line_no, indent + 1)
+        self.index += consumed
         return ExprStatement(expr, SourceLocation(line_no, indent + 1))
+
+    def _collect_continued_expression(self, text: str, line_no: int) -> tuple[str, int]:
+        expression = text
+        balance = self._delimiter_balance(text)
+        consumed = 1
+
+        while balance > 0:
+            next_index = self.index + consumed
+            if next_index >= self._line_count():
+                self._raise("Unterminated expression. Missing closing bracket/parenthesis", line_no, 1)
+
+            next_line = self._strip_comment(self.lines[next_index]).strip()
+            expression = f"{expression}\n{next_line}"
+            balance += self._delimiter_balance(next_line)
+            consumed += 1
+
+        return expression, consumed
+
+    def _delimiter_balance(self, text: str) -> int:
+        balance = 0
+        in_quote: str | None = None
+        escaped = False
+
+        for char in text:
+            if in_quote is not None:
+                if escaped:
+                    escaped = False
+                    continue
+                if char == "\\":
+                    escaped = True
+                    continue
+                if char == in_quote:
+                    in_quote = None
+                continue
+
+            if char in {"'", '"'}:
+                in_quote = char
+                continue
+            if char in {"(", "["}:
+                balance += 1
+                continue
+            if char in {")", "]"}:
+                balance -= 1
+        return balance
 
     def _parse_for_statement(self, text: str, line_no: int, indent: int) -> ForStatement:
         match = _FOR_RE.match(text)

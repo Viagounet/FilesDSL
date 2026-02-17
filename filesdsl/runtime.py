@@ -453,6 +453,9 @@ class DSLDirectory:
     def __str__(self) -> str:
         return self._display_path()
 
+    def __len__(self) -> int:
+        return len(self._iter_file_paths(self.recursive))
+
     def _display_path(self, path: Path | None = None) -> str:
         target = path if path is not None else self.path
         return _render_relative_path(target, self.display_root)
