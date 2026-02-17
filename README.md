@@ -29,6 +29,8 @@ It intentionally exposes only read/search primitives and simple control flow.
     `=== Table of contents for file {file} ===`
     followed by an indented TOC tree with page numbers when available.
     If none is found, it returns: `No table of contents detected for {file}`.
+  - `file.semantic_search(query, top_k=5)` semantic retrieval over prepared embeddings.
+    Returns the most similar page numbers in that file.
   - `file.snippets("regex")` returns short excerpts.
 
 `file` methods work across PDF, DOCX, PPTX, and plain-text files.
@@ -52,6 +54,11 @@ uv run python -m filesdsl examples/demo.fdsl
 Optional custom sandbox root:
 ```bash
 uv run python -m filesdsl examples/demo.fdsl --sandbox-root .
+```
+
+Prepare semantic index (recursive, page-level):
+```bash
+uv run fdsl prepare data
 ```
 
 ## Python API

@@ -1,2 +1,3 @@
 [console_scripts]
+fdsl = filesdsl.__main__:main
 filesdsl = filesdsl.__main__:main

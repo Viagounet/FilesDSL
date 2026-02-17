@@ -7,6 +7,7 @@ Description-Content-Type: text/markdown
 Requires-Dist: pymupdf>=1.26.4
 Requires-Dist: python-docx>=1.2.0
 Requires-Dist: python-pptx>=1.0.2
+Requires-Dist: chromadb>=0.5.23
 
 # FilesDSL
 FilesDSL is a small domain-specific language for safe directory/file exploration by LLM agents.
@@ -34,8 +35,13 @@ It intentionally exposes only read/search primitives and simple control flow.
   - `file.search("regex")` returns matching page/chunk numbers.
   - `file.contains("regex")` boolean.
   - `file.head()`, `file.tail()`.
-  - `file.table()` best-effort TOC extraction as an indented tree string with page numbers.
+  - `file.table()` best-effort TOC extraction.
+    If found, it returns:
+    `=== Table of contents for file {file} ===`
+    followed by an indented TOC tree with page numbers when available.
     If none is found, it returns: `No table of contents detected for {file}`.
+  - `file.semantic_search(query, top_k=5)` semantic retrieval over prepared embeddings.
+    Returns the most similar page numbers in that file.
   - `file.snippets("regex")` returns short excerpts.
 
 `file` methods work across PDF, DOCX, PPTX, and plain-text files.
@@ -59,6 +65,11 @@ uv run python -m filesdsl examples/demo.fdsl
 Optional custom sandbox root:
 ```bash
 uv run python -m filesdsl examples/demo.fdsl --sandbox-root .
+```
+
+Prepare semantic index (recursive, page-level):
+```bash
+uv run fdsl prepare data
 ```
 
 ## Python API

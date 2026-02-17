@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from filesdsl.errors import DSLRuntimeError, DSLSyntaxError
 from filesdsl.interpreter import execute_fdsl, run_script
@@ -100,6 +101,31 @@ first = f.head()
             self.assertTrue(variables["has_alpha"])
             self.assertEqual(variables["alpha_pages"], [1])
             self.assertIn("alpha", variables["first"])
+
+    def test_semantic_search_file_method(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "single.txt").write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+            script = """
+f = File("single.txt")
+hits = f.semantic_search("alpha", top_k=2)
+"""
+            with patch("filesdsl.semantic.semantic_search_file_pages", return_value=[2, 1]) as search_mock:
+                variables = run_script(script, cwd=root, sandbox_root=root)
+
+            self.assertEqual(variables["hits"], [2, 1])
+            search_mock.assert_called_once()
+
+    def test_semantic_search_rejects_invalid_top_k(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "single.txt").write_text("alpha\nbeta\ngamma\n", encoding="utf-8")
+            script = """
+f = File("single.txt")
+hits = f.semantic_search("alpha", top_k=0)
+"""
+            with self.assertRaises(DSLRuntimeError):
+                run_script(script, cwd=root, sandbox_root=root)
 
     def test_printed_paths_are_relative_to_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

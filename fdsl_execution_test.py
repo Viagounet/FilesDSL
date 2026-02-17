@@ -11,7 +11,8 @@ terms = ["a",
     "d"]
 for term in terms:
     print(term)
-# for file in pdfs:
+for file in pdfs:
+    print(file.semantic_search("LLM"))
 #     if file.contains("\\bLLM(s)?\\b|large language model(s)?", ignore_case=true):
 #         print("")
 #         print("FILE:", file)

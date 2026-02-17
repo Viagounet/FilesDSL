@@ -20,6 +20,11 @@ Optional sandbox root:
 uv run python -m filesdsl path/to/script.fdsl --sandbox-root .
 ```
 
+Prepare semantic index (recursive, page-level embeddings):
+```bash
+uv run fdsl prepare path/to/folder
+```
+
 ## Python Integration
 Use `execute_fdsl(...)` when you run FDSL from Python and want console history.
 
@@ -159,6 +164,16 @@ Returns last page/chunk.
 ### `file.snippets(pattern, max_results=5, context_chars=80, ignore_case=false) -> list[string]`
 Returns contextual snippets for each regex match.
 
+### `file.semantic_search(query, top_k=5) -> list[int]`
+Runs semantic retrieval over a prepared ChromaDB index and returns the top-k
+most similar page/chunk numbers for this file.
+
+Notes:
+1. `query` must be a non-empty string.
+2. `top_k` must be a positive integer.
+3. Requires a previously prepared index with:
+   `fdsl prepare <folder>`
+
 ### `file.table(max_items=50) -> string`
 Returns a formatted TOC block when available:
 
@@ -189,7 +204,8 @@ No table of contents detected for <file-path>
 7. `file.search(pattern, ignore_case=false)`
 8. `file.contains(pattern, ignore_case=false)`
 9. `file.snippets(pattern, max_results=5, context_chars=80, ignore_case=false)`
-10. `file.table(max_items=50)`
+10. `file.semantic_search(query, top_k=5)`
+11. `file.table(max_items=50)`
 
 ## Format Handling
 PDF parsing uses `pymupdf` (PyMuPDF):
@@ -204,6 +220,11 @@ PowerPoint parsing uses `python-pptx`:
 1. Slide text extraction for `read/search/contains`.
 2. Slide titles for TOC extraction in `file.table()`.
 3. Slides are treated as page/chunk units.
+
+Semantic indexing uses:
+1. `chromadb` for persistent vector storage.
+2. Chroma's built-in `ONNXMiniLM_L6_V2` embedding model (MiniLM-v2).
+3. Page-level embeddings with file name included in embedding input.
 
 ## Error Model
 

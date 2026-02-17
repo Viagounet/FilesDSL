@@ -97,6 +97,21 @@ class DSLFile:
             f"{self._format_toc_tree(entries)}"
         )
 
+    def semantic_search(self, query: str, top_k: int = 5) -> list[int]:
+        if not isinstance(query, str) or query.strip() == "":
+            raise DSLRuntimeError("query must be a non-empty string")
+        if not isinstance(top_k, int) or top_k < 1:
+            raise DSLRuntimeError("top_k must be a positive integer")
+
+        from .semantic import semantic_search_file_pages
+
+        return semantic_search_file_pages(
+            file_path=self.path,
+            query=query,
+            top_k=top_k,
+            display_root=self.display_root,
+        )
+
     def snippets(
         self,
         pattern: str,

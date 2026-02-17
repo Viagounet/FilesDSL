@@ -116,6 +116,10 @@ Notes:
   ) -> list[string]
   Returns short match excerpts.
 
+- semantic_search(query, top_k=5) -> list[int]
+  Returns top-k most similar page/chunk numbers for this file,
+  using a prepared semantic index (`fdsl prepare <folder>`).
+
 - table(max_items=50) -> string
   Returns a formatted TOC block when available:
   "=== Table of contents for file <file-path> ==="
@@ -135,6 +139,7 @@ Notes:
 - file.search(..., ignore_case=false)
 - file.contains(..., ignore_case=false)
 - file.snippets(..., max_results=5, context_chars=80, ignore_case=false)
+- file.semantic_search(query, top_k=5)
 - file.table(max_items=50)
 
 10) Practical output expectations
