@@ -117,7 +117,9 @@ Notes:
   Returns short match excerpts.
 
 - table(max_items=50) -> string
-  Returns an indented chapter/section tree with location metadata when available.
+  Returns a formatted TOC block when available:
+  "=== Table of contents for file <file-path> ==="
+  followed by an indented chapter/section tree with location metadata when available.
   PDF and PPTX usually include `(p.<n>)`.
   DOCX usually contains heading hierarchy without page numbers.
   If not detected:

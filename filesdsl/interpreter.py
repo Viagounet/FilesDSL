@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -208,15 +209,21 @@ class Interpreter:
         candidate = self._resolve_sandboxed_path(path, "Directory")
         if not isinstance(recursive, bool):
             raise DSLRuntimeError("Directory(..., recursive=...) expects a boolean")
-        return DSLDirectory(candidate, recursive=recursive)
+        return DSLDirectory(candidate, recursive=recursive, display_root=self.cwd)
 
     def _builtin_file(self, path: str):
         candidate = self._resolve_sandboxed_path(path, "File")
         if not candidate.exists():
-            raise DSLRuntimeError(f"File does not exist: {candidate.as_posix()}")
+            raise DSLRuntimeError(f"File does not exist: {self._display_path(candidate)}")
         if not candidate.is_file():
-            raise DSLRuntimeError(f"Path is not a file: {candidate.as_posix()}")
-        return DSLFile(candidate)
+            raise DSLRuntimeError(f"Path is not a file: {self._display_path(candidate)}")
+        return DSLFile(candidate, display_root=self.cwd)
+
+    def _display_path(self, path: Path) -> str:
+        try:
+            return Path(os.path.relpath(path.resolve(), self.cwd)).as_posix()
+        except ValueError:
+            return path.resolve().as_posix()
 
     def _resolve_sandboxed_path(self, path: str, ctor_name: str) -> Path:
         if not isinstance(path, str):
@@ -228,8 +235,8 @@ class Interpreter:
             candidate = candidate.resolve()
         if not candidate.is_relative_to(self.sandbox_root):
             raise DSLRuntimeError(
-                f"Access denied. '{candidate.as_posix()}' is outside sandbox root "
-                f"'{self.sandbox_root.as_posix()}'"
+                f"Access denied. '{self._display_path(candidate)}' is outside sandbox root "
+                f"'{self._display_path(self.sandbox_root)}'"
             )
         return candidate
 

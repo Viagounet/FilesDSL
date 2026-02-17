@@ -160,7 +160,14 @@ Returns last page/chunk.
 Returns contextual snippets for each regex match.
 
 ### `file.table(max_items=50) -> string`
-Returns an indented table-of-contents tree with location metadata when available.
+Returns a formatted TOC block when available:
+
+```text
+=== Table of contents for file <file-path> ===
+<indented toc tree>
+```
+
+The indented TOC tree includes location metadata when available.
 
 Examples of location metadata:
 1. PDF: page numbers, e.g. `(p.12)`

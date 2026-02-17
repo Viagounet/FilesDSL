@@ -24,7 +24,10 @@ It intentionally exposes only read/search primitives and simple control flow.
   - `file.search("regex")` returns matching page/chunk numbers.
   - `file.contains("regex")` boolean.
   - `file.head()`, `file.tail()`.
-  - `file.table()` best-effort TOC extraction as an indented tree string with page numbers.
+  - `file.table()` best-effort TOC extraction.
+    If found, it returns:
+    `=== Table of contents for file {file} ===`
+    followed by an indented TOC tree with page numbers when available.
     If none is found, it returns: `No table of contents detected for {file}`.
   - `file.snippets("regex")` returns short excerpts.
 

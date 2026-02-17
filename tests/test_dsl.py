@@ -70,6 +70,19 @@ first = f.head()
             self.assertEqual(variables["alpha_pages"], [1])
             self.assertIn("alpha", variables["first"])
 
+    def test_printed_paths_are_relative_to_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "single.txt").write_text("alpha\n", encoding="utf-8")
+            script = """
+d = Directory(".")
+f = File("single.txt")
+print(d)
+print(f)
+"""
+            output = execute_fdsl(script, cwd=root, sandbox_root=root)
+            self.assertEqual(output, ".\nsingle.txt\n")
+
     def test_sandbox_denies_outside_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -104,6 +117,10 @@ for file in files:
 """
             variables = run_script(script, cwd=root, sandbox_root=root)
             self.assertIsInstance(variables["toc"], str)
+            self.assertIn(
+                "=== Table of contents for file toc.txt ===",
+                variables["toc"],
+            )
             self.assertIn("1 Introduction (p.1)", variables["toc"])
             self.assertIn("  1.1 Scope (p.2)", variables["toc"])
             self.assertIn("2 Methods (p.5)", variables["toc"])
@@ -111,8 +128,7 @@ for file in files:
     def test_table_returns_no_toc_message(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            no_toc_file = root / "plain.txt"
-            no_toc_file.write_text("hello\nworld\n", encoding="utf-8")
+            (root / "plain.txt").write_text("hello\nworld\n", encoding="utf-8")
             script = """
 docs = Directory(".")
 files = docs.search("plain\\.txt$", scope="name")
@@ -121,7 +137,7 @@ for file in files:
     toc = file.table()
 """
             variables = run_script(script, cwd=root, sandbox_root=root)
-            expected = f"No table of contents detected for {no_toc_file.as_posix()}"
+            expected = "No table of contents detected for plain.txt"
             self.assertEqual(variables["toc"], expected)
 
     def test_directory_tree_output(self) -> None:
@@ -137,7 +153,7 @@ tree_text = docs.tree(max_depth=3)
 """
             variables = run_script(script, cwd=root, sandbox_root=root)
             tree_text = variables["tree_text"]
-            self.assertIn(f"{root.as_posix()}/", tree_text)
+            self.assertEqual(tree_text.splitlines()[0], "./")
             self.assertIn("  nested/", tree_text)
             self.assertIn("    inside.txt", tree_text)
             self.assertIn("  top.txt", tree_text)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -16,17 +17,34 @@ def _compile_regex(pattern: str, ignore_case: bool = False) -> re.Pattern[str]:
         raise DSLRuntimeError(f"Invalid regex pattern: {exc}") from exc
 
 
+def _render_relative_path(path: Path, cwd: Path) -> str:
+    try:
+        return Path(os.path.relpath(path.resolve(), cwd.resolve())).as_posix()
+    except ValueError:
+        return path.resolve().as_posix()
+
+
 class DSLFile:
-    def __init__(self, path: Path, text_chunk_lines: int = 80) -> None:
+    def __init__(
+        self,
+        path: Path,
+        text_chunk_lines: int = 80,
+        display_root: Path | None = None,
+    ) -> None:
         self.path = path
         self._text_chunk_lines = text_chunk_lines
+        self.display_root = (display_root or Path.cwd()).resolve()
         self._chunks_cache: list[str] | None = None
 
     def __repr__(self) -> str:
-        return f"File('{self.path.as_posix()}')"
+        return f"File('{self._display_path()}')"
 
     def __str__(self) -> str:
-        return self.path.as_posix()
+        return self._display_path()
+
+    def _display_path(self, path: Path | None = None) -> str:
+        target = path if path is not None else self.path
+        return _render_relative_path(target, self.display_root)
 
     def read(self, pages=None):
         chunks = self._chunks()
@@ -73,8 +91,11 @@ class DSLFile:
         if not entries:
             entries = self._extract_toc_entries_from_text(max_items=max_items)
         if not entries:
-            return f"No table of contents detected for {self.path.as_posix()}"
-        return self._format_toc_tree(entries)
+            return f"No table of contents detected for {self._display_path()}"
+        return (
+            f"=== Table of contents for file {self._display_path()} ===\n"
+            f"{self._format_toc_tree(entries)}"
+        )
 
     def snippets(
         self,
@@ -412,29 +433,42 @@ class DSLFile:
 
 
 class DSLDirectory:
-    def __init__(self, path: Path, recursive: bool = True) -> None:
+    def __init__(
+        self,
+        path: Path,
+        recursive: bool = True,
+        display_root: Path | None = None,
+    ) -> None:
+        self.display_root = (display_root or Path.cwd()).resolve()
         if not path.exists():
-            raise DSLRuntimeError(f"Directory does not exist: {path.as_posix()}")
+            raise DSLRuntimeError(f"Directory does not exist: {self._display_path(path)}")
         if not path.is_dir():
-            raise DSLRuntimeError(f"Path is not a directory: {path.as_posix()}")
+            raise DSLRuntimeError(f"Path is not a directory: {self._display_path(path)}")
         self.path = path
         self.recursive = recursive
 
     def __repr__(self) -> str:
-        return f"Directory('{self.path.as_posix()}')"
+        return f"Directory('{self._display_path()}')"
 
     def __str__(self) -> str:
-        return self.path.as_posix()
+        return self._display_path()
+
+    def _display_path(self, path: Path | None = None) -> str:
+        target = path if path is not None else self.path
+        return _render_relative_path(target, self.display_root)
 
     def __iter__(self):
         files = self._iter_file_paths(self.recursive)
         for file_path in files:
-            yield DSLFile(file_path)
+            yield DSLFile(file_path, display_root=self.display_root)
 
     def files(self, recursive: bool | None = None) -> list[DSLFile]:
         if recursive is None:
             recursive = self.recursive
-        return [DSLFile(path) for path in self._iter_file_paths(recursive)]
+        return [
+            DSLFile(path, display_root=self.display_root)
+            for path in self._iter_file_paths(recursive)
+        ]
 
     def tree(self, max_depth: int = 5, max_entries: int = 500) -> str:
         if not isinstance(max_depth, int) or max_depth < 0:
@@ -442,7 +476,7 @@ class DSLDirectory:
         if not isinstance(max_entries, int) or max_entries < 1:
             raise DSLRuntimeError("max_entries must be a positive integer")
 
-        lines: list[str] = [f"{self.path.as_posix()}/"]
+        lines: list[str] = [f"{self._display_path()}/"]
         emitted = 1
         truncated = False
 
@@ -495,7 +529,10 @@ class DSLDirectory:
             raise DSLRuntimeError("scope must be one of: 'name', 'content', 'both'")
 
         regex = _compile_regex(pattern, ignore_case=ignore_case)
-        files = [DSLFile(path) for path in self._iter_file_paths(recursive)]
+        files = [
+            DSLFile(path, display_root=self.display_root)
+            for path in self._iter_file_paths(recursive)
+        ]
         matches: list[DSLFile] = []
         for file in files:
             relative = file.path.relative_to(self.path).as_posix()
