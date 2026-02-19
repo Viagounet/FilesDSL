@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from io import StringIO
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +18,27 @@ class FilesDSLTests(unittest.TestCase):
             code = "x = 1\npages = [2:4]\nprint(x)\nprint(pages)\n"
             output = execute_fdsl(code, cwd=root, sandbox_root=root)
             self.assertEqual(output, "1\n[2, 3, 4]\n")
+
+    def test_execute_fdsl_output_isolated_per_call_under_threads(self) -> None:
+        root = Path.cwd()
+
+        def run_case(value: int) -> str:
+            code = f'value = {value}\nprint("start", value)\nprint([1:3])\nprint("end", value)\n'
+            return execute_fdsl(code, cwd=root, sandbox_root=root)
+
+        for _ in range(5):
+            with ThreadPoolExecutor(max_workers=16) as executor:
+                outputs = list(executor.map(run_case, range(64)))
+
+            for value, output in enumerate(outputs):
+                expected = f"start {value}\n[1, 2, 3]\nend {value}\n"
+                self.assertEqual(output, expected)
+
+    def test_run_script_writes_prints_to_given_stdout(self) -> None:
+        root = Path.cwd()
+        output = StringIO()
+        run_script('print("alpha", 1)\n', cwd=root, sandbox_root=root, stdout=output)
+        self.assertEqual(output.getvalue(), "alpha 1\n")
 
     def test_range_syntax_in_lists(self) -> None:
         script = "pages = [1, 5:8, 15]\n"

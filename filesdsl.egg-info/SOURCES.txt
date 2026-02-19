@@ -16,3 +16,4 @@ filesdsl.egg-info/requires.txt
 filesdsl.egg-info/top_level.txt
 tests/test_cli.py
 tests/test_dsl.py
+tests/test_prepare_faiss.py

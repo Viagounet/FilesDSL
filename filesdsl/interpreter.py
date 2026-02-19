@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import os
-from contextlib import redirect_stdout
+import sys
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from .ast_nodes import (
     Assign,
@@ -35,11 +35,13 @@ class Interpreter:
         *,
         cwd: Path | None = None,
         sandbox_root: Path | None = None,
+        stdout: TextIO | None = None,
     ) -> None:
         self.source = source
         self.source_lines = source.splitlines()
         self.cwd = (cwd or Path.cwd()).resolve()
         self.sandbox_root = (sandbox_root or self.cwd).resolve()
+        self.stdout = stdout if stdout is not None else sys.stdout
         self.variables: dict[str, Any] = {}
         self.builtins = {
             "Directory": self._builtin_directory,
@@ -247,7 +249,7 @@ class Interpreter:
 
     def _builtin_print(self, *args) -> None:
         rendered = [self._render_value(arg) for arg in args]
-        print(*rendered)
+        print(*rendered, file=self.stdout)
 
     def _render_value(self, value: Any) -> Any:
         if isinstance(value, list):
@@ -276,8 +278,9 @@ def run_script(
     *,
     cwd: Path | None = None,
     sandbox_root: Path | None = None,
+    stdout: TextIO | None = None,
 ) -> dict[str, Any]:
-    interpreter = Interpreter(source, cwd=cwd, sandbox_root=sandbox_root)
+    interpreter = Interpreter(source, cwd=cwd, sandbox_root=sandbox_root, stdout=stdout)
     return interpreter.run()
 
 
@@ -300,6 +303,5 @@ def execute_fdsl(
     resolved_cwd = Path(cwd).resolve() if cwd is not None else None
     resolved_sandbox = Path(sandbox_root).resolve() if sandbox_root is not None else None
     output = StringIO()
-    with redirect_stdout(output):
-        run_script(code, cwd=resolved_cwd, sandbox_root=resolved_sandbox)
+    run_script(code, cwd=resolved_cwd, sandbox_root=resolved_sandbox, stdout=output)
     return output.getvalue()

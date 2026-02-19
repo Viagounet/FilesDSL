@@ -33,12 +33,14 @@ count = len(all_files)
 notes = File('notes.txt')
 has_alpha = notes.contains('alpha')
 alpha_pages = notes.search('alpha')
+semantic_pages = notes.semantic_search('alpha', top_k=1)
 head_text = notes.head()
 '''
             variables = run_script(script, cwd=work, sandbox_root=work)
             self.assertGreaterEqual(variables['count'], 1)
             self.assertTrue(variables['has_alpha'])
             self.assertEqual(variables['alpha_pages'], [1])
+            self.assertEqual(variables['semantic_pages'], [1])
             self.assertIn('alpha', variables['head_text'])
 
     def _create_fixture_documents(self, root: Path) -> None:

@@ -7,6 +7,7 @@ import os
 import re
 import zipfile
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -76,18 +77,16 @@ def semantic_search_file_pages(file_path: Path, query: str, top_k: int, *, displ
     resolved_file_path = file_path.resolve()
     indexed_root = _find_indexed_root(resolved_file_path, display_root=display_root)
     relative_path = resolved_file_path.relative_to(indexed_root).as_posix()
-
-    records, vectors = _load_faiss_database(indexed_root / SEMANTIC_DB_DIRNAME)
+    db_path = indexed_root / SEMANTIC_DB_DIRNAME
+    vectors = _load_vectors(db_path)
+    _, record_positions = _load_record_indexes(db_path)
     query_vector = _encode_texts([query.strip()])[0]
 
     scored_pages: list[tuple[float, int]] = []
-    for idx, rec in enumerate(records):
-        if rec.get("relative_path") != relative_path:
+    for vector_index, page in record_positions.get(relative_path, ()):
+        if vector_index >= len(vectors):
             continue
-        page = rec.get("page")
-        if not isinstance(page, int):
-            continue
-        score = _dot(query_vector, vectors[idx])
+        score = _dot(query_vector, vectors[vector_index])
         scored_pages.append((score, page))
 
     scored_pages.sort(key=lambda item: item[0], reverse=True)
@@ -105,17 +104,12 @@ def get_file_pages_from_database(file_path: Path, display_root: Path | None = No
     if not records_path.is_file():
         return None
 
-    records = json.loads(records_path.read_text(encoding="utf-8"))
     relative_path = resolved_file_path.relative_to(indexed_root).as_posix()
-    pages = [
-        record
-        for record in records
-        if isinstance(record, dict) and record.get("relative_path") == relative_path
-    ]
+    file_pages, _ = _load_record_indexes(indexed_root / SEMANTIC_DB_DIRNAME)
+    pages = file_pages.get(relative_path)
     if not pages:
         return None
-    pages.sort(key=lambda item: int(item.get("page", 0)))
-    return [str(item.get("text", "")) for item in pages]
+    return [text for _, text in pages]
 
 
 def get_directory_file_paths_from_database(directory_path: Path, recursive: bool, display_root: Path | None = None) -> list[Path] | None:
@@ -129,16 +123,13 @@ def get_directory_file_paths_from_database(directory_path: Path, recursive: bool
     if not records_path.is_file():
         return None
 
-    records = json.loads(records_path.read_text(encoding="utf-8"))
+    file_pages, _ = _load_record_indexes(indexed_root / SEMANTIC_DB_DIRNAME)
     rel_dir = resolved_dir.relative_to(indexed_root).as_posix()
     if rel_dir == ".":
         rel_dir = ""
 
     result: set[Path] = set()
-    for record in records:
-        rel = record.get("relative_path") if isinstance(record, dict) else None
-        if not isinstance(rel, str):
-            continue
+    for rel in file_pages:
         rel_parent = str(Path(rel).parent.as_posix())
         if rel_parent == ".":
             rel_parent = ""
@@ -296,13 +287,94 @@ def _write_faiss_database(db_path: Path, records: list[dict[str, str | int]], em
 
 
 def _load_faiss_database(db_path: Path):
-    records_path = db_path / SEMANTIC_RECORDS_FILENAME
-    vectors_path = db_path / SEMANTIC_VECTORS_FILENAME
-    if not records_path.is_file() or not vectors_path.is_file():
-        raise DSLRuntimeError("No prepared semantic index collection found. Run 'uv run fdsl prepare <folder>' first.")
-    records = json.loads(records_path.read_text(encoding="utf-8"))
-    vectors = json.loads(vectors_path.read_text(encoding="utf-8"))
+    records = _load_records(db_path)
+    vectors = _load_vectors(db_path)
     return records, vectors
+
+
+def _load_records(db_path: Path) -> list[dict[str, str | int]]:
+    records_path = db_path / SEMANTIC_RECORDS_FILENAME
+    if not records_path.is_file():
+        raise DSLRuntimeError("No prepared semantic index collection found. Run 'uv run fdsl prepare <folder>' first.")
+    return _load_records_cached(*_cache_key(records_path))
+
+
+def _load_vectors(db_path: Path) -> list[list[float]]:
+    vectors_path = db_path / SEMANTIC_VECTORS_FILENAME
+    if not vectors_path.is_file():
+        raise DSLRuntimeError("No prepared semantic index collection found. Run 'uv run fdsl prepare <folder>' first.")
+    return _load_vectors_cached(*_cache_key(vectors_path))
+
+
+def _cache_key(path: Path) -> tuple[str, int, int]:
+    stats = path.stat()
+    return (path.as_posix(), stats.st_mtime_ns, stats.st_size)
+
+
+@lru_cache(maxsize=8)
+def _load_records_cached(path: str, mtime_ns: int, size: int) -> list[dict[str, str | int]]:
+    del mtime_ns, size
+    loaded = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(loaded, list):
+        raise DSLRuntimeError("Semantic records database is corrupted.")
+    records: list[dict[str, str | int]] = []
+    for entry in loaded:
+        if isinstance(entry, dict):
+            records.append(entry)
+    return records
+
+
+@lru_cache(maxsize=8)
+def _load_vectors_cached(path: str, mtime_ns: int, size: int) -> list[list[float]]:
+    del mtime_ns, size
+    loaded = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(loaded, list):
+        raise DSLRuntimeError("Semantic vectors database is corrupted.")
+    vectors: list[list[float]] = []
+    for vector in loaded:
+        if isinstance(vector, list):
+            vectors.append([float(value) for value in vector])
+    return vectors
+
+
+def _load_record_indexes(db_path: Path) -> tuple[dict[str, tuple[tuple[int, str], ...]], dict[str, tuple[tuple[int, int], ...]]]:
+    records_path = db_path / SEMANTIC_RECORDS_FILENAME
+    if not records_path.is_file():
+        raise DSLRuntimeError("No prepared semantic index collection found. Run 'uv run fdsl prepare <folder>' first.")
+    return _load_record_indexes_cached(*_cache_key(records_path))
+
+
+@lru_cache(maxsize=8)
+def _load_record_indexes_cached(
+    path: str, mtime_ns: int, size: int
+) -> tuple[dict[str, tuple[tuple[int, str], ...]], dict[str, tuple[tuple[int, int], ...]]]:
+    records = _load_records_cached(path, mtime_ns, size)
+    pages_by_path: dict[str, list[tuple[int, str]]] = {}
+    positions_by_path: dict[str, list[tuple[int, int]]] = {}
+
+    for index, record in enumerate(records):
+        relative_path = record.get("relative_path")
+        if not isinstance(relative_path, str):
+            continue
+
+        page_number = record.get("page")
+        normalized_page = page_number if isinstance(page_number, int) else 0
+        text = record.get("text", "")
+        pages_by_path.setdefault(relative_path, []).append((normalized_page, str(text)))
+        if isinstance(page_number, int):
+            positions_by_path.setdefault(relative_path, []).append((index, page_number))
+
+    normalized_pages: dict[str, tuple[tuple[int, str], ...]] = {}
+    for relative_path, pages in pages_by_path.items():
+        pages.sort(key=lambda item: item[0])
+        normalized_pages[relative_path] = tuple(pages)
+
+    normalized_positions: dict[str, tuple[tuple[int, int], ...]] = {}
+    for relative_path, positions in positions_by_path.items():
+        positions.sort(key=lambda item: item[1])
+        normalized_positions[relative_path] = tuple(positions)
+
+    return normalized_pages, normalized_positions
 
 
 def _encode_texts(texts: list[str]) -> list[list[float]]:
