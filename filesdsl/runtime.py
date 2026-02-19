@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 from .errors import DSLRuntimeError
 
@@ -464,10 +465,11 @@ class DSLDirectory:
         display_root: Path | None = None,
     ) -> None:
         self.display_root = (display_root or Path.cwd()).resolve()
-        if not path.exists():
+        if path.exists():
+            if not path.is_dir():
+                raise DSLRuntimeError(f"Path is not a directory: {self._display_path(path)}")
+        elif not self._has_db_backed_files(path):
             raise DSLRuntimeError(f"Directory does not exist: {self._display_path(path)}")
-        if not path.is_dir():
-            raise DSLRuntimeError(f"Path is not a directory: {self._display_path(path)}")
         self.path = path
         self.recursive = recursive
 
@@ -503,6 +505,16 @@ class DSLDirectory:
         if not isinstance(max_entries, int) or max_entries < 1:
             raise DSLRuntimeError("max_entries must be a positive integer")
 
+        from .semantic import get_directory_file_paths_from_database
+
+        db_paths = get_directory_file_paths_from_database(
+            self.path,
+            recursive=True,
+            display_root=self.display_root,
+        )
+        if db_paths is not None:
+            return self._render_tree_from_paths(db_paths, max_depth=max_depth, max_entries=max_entries)
+
         lines: list[str] = [f"{self._display_path()}/"]
         emitted = 1
         truncated = False
@@ -536,6 +548,77 @@ class DSLDirectory:
             return True
 
         walk(self.path, 0)
+        if truncated:
+            lines.append(f"... truncated after {max_entries} entries")
+        return "\n".join(lines)
+
+    def _render_tree_from_paths(
+        self,
+        paths: list[Path],
+        *,
+        max_depth: int,
+        max_entries: int,
+    ) -> str:
+        root: dict[str, dict[str, Any] | set[str]] = {
+            "dirs": {},
+            "files": set(),
+        }
+
+        for path in paths:
+            try:
+                relative_path = path.relative_to(self.path)
+            except ValueError:
+                continue
+            if not relative_path.parts:
+                continue
+
+            node = root
+            for part in relative_path.parts[:-1]:
+                dirs = node["dirs"]
+                if not isinstance(dirs, dict):
+                    break
+                node = dirs.setdefault(part, {"dirs": {}, "files": set()})
+            else:
+                files = node["files"]
+                if isinstance(files, set):
+                    files.add(relative_path.parts[-1])
+
+        lines: list[str] = [f"{self._display_path()}/"]
+        emitted = 1
+        truncated = False
+
+        def walk(node: dict[str, dict[str, Any] | set[str]], depth: int) -> bool:
+            nonlocal emitted, truncated
+            if depth >= max_depth:
+                return True
+
+            dirs = node["dirs"]
+            files = node["files"]
+            if not isinstance(dirs, dict) or not isinstance(files, set):
+                return True
+
+            dir_items = sorted(dirs.items(), key=lambda item: item[0].lower())
+            file_items = sorted(files, key=lambda item: item.lower())
+
+            for name, child in dir_items:
+                if emitted >= max_entries:
+                    truncated = True
+                    return False
+                lines.append(f"{'  ' * (depth + 1)}{name}/")
+                emitted += 1
+                if isinstance(child, dict):
+                    if not walk(child, depth + 1):
+                        return False
+
+            for name in file_items:
+                if emitted >= max_entries:
+                    truncated = True
+                    return False
+                lines.append(f"{'  ' * (depth + 1)}{name}")
+                emitted += 1
+            return True
+
+        walk(root, 0)
         if truncated:
             lines.append(f"... truncated after {max_entries} entries")
         return "\n".join(lines)
@@ -593,3 +676,13 @@ class DSLDirectory:
             paths = [path for path in self.path.glob("*") if path.is_file()]
         paths.sort(key=lambda p: p.as_posix())
         return paths
+
+    def _has_db_backed_files(self, path: Path) -> bool:
+        from .semantic import get_directory_file_paths_from_database
+
+        db_paths = get_directory_file_paths_from_database(
+            path,
+            recursive=True,
+            display_root=self.display_root,
+        )
+        return bool(db_paths)

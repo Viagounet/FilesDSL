@@ -30,6 +30,7 @@ class PrepareFaissIntegrationTests(unittest.TestCase):
 root = Directory('.')
 all_files = root.search('sample|notes', scope='name')
 count = len(all_files)
+tree_text = root.tree(max_depth=4)
 notes = File('notes.txt')
 has_alpha = notes.contains('alpha')
 alpha_pages = notes.search('alpha')
@@ -42,9 +43,44 @@ head_text = notes.head()
             self.assertEqual(variables['alpha_pages'], [1])
             self.assertEqual(variables['semantic_pages'], [1])
             self.assertIn('alpha', variables['head_text'])
+            self.assertEqual(variables['tree_text'].splitlines()[0], './')
+            self.assertIn('sample.pdf', variables['tree_text'])
+            self.assertIn('sample.docx', variables['tree_text'])
+            self.assertIn('sample.pptx', variables['tree_text'])
+            self.assertNotIn('.fdsl_faiss/', variables['tree_text'])
+
+    def test_db_backed_subdirectory_works_when_folder_missing_on_disk(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            work = Path(temp_dir) / 'data'
+            work.mkdir(parents=True, exist_ok=True)
+            self._create_fixture_documents(work)
+            prepare_semantic_database(work)
+
+            for path in sorted(work.rglob('*'), key=lambda p: len(p.parts), reverse=True):
+                if '.fdsl_faiss' in path.as_posix():
+                    continue
+                if path.is_file():
+                    path.unlink()
+                elif path.is_dir():
+                    path.rmdir()
+
+            script = '''
+sub = Directory('another_folder')
+count = len(sub)
+tree_text = sub.tree(max_depth=3)
+matches = sub.search('nested_note\\.txt$', scope='name')
+match_count = len(matches)
+'''
+            variables = run_script(script, cwd=work, sandbox_root=work)
+            self.assertGreaterEqual(variables['count'], 1)
+            self.assertEqual(variables['match_count'], 1)
+            self.assertEqual(variables['tree_text'].splitlines()[0], 'another_folder/')
+            self.assertIn('nested_note.txt', variables['tree_text'])
 
     def _create_fixture_documents(self, root: Path) -> None:
         (root / 'notes.txt').write_text('alpha line\nbeta line\n', encoding='utf-8')
+        (root / 'another_folder').mkdir(parents=True, exist_ok=True)
+        (root / 'another_folder' / 'nested_note.txt').write_text('nested alpha note\n', encoding='utf-8')
 
         pdf_content = '''%PDF-1.4
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj

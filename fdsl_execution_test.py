@@ -1,7 +1,7 @@
 from filesdsl import execute_fdsl
 
 code = """
-docs = Directory(".")
+docs = Directory("office_samples")
 pdfs = docs.search(".*\\.pdf$", scope="name")
 print(len(docs))
 print("=== LLM PAPER SEARCH + SHORT SUMMARY ===")
@@ -21,7 +21,7 @@ for file in pdfs:
 #         print(file.table(max_items=6))
 #         print("SUMMARY_HINT_SNIPPET:")
 #         print(file.snippets("\\bLLM(s)?\\b|large language model(s)?", max_results=1, ignore_case=true))
-# print(File("another_folder/Querying_documents_with_LLMs_NEPAL_LM_Weekly_Blog-1.pdf").read(pages=[1]))
+print(File("another_folder/2405.00332v3.pdf").read(pages=[1:10]))
 """
 
 history = execute_fdsl(code, cwd="data", sandbox_root=".")
