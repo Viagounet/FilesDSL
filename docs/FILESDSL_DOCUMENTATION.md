@@ -1,5 +1,7 @@
 # FilesDSL Documentation
 
+> For a detailed breakdown of the current FAISS-based indexing/storage flow, see `docs/FAISS_INDEXING.md`.
+
 ## Overview
 FilesDSL is a constrained language for file exploration by LLM agents. It supports:
 1. Safe directory traversal.

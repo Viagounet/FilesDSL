@@ -213,11 +213,16 @@ class Interpreter:
 
     def _builtin_file(self, path: str):
         candidate = self._resolve_sandboxed_path(path, "File")
+        if candidate.exists() and candidate.is_file():
+            return DSLFile(candidate, display_root=self.cwd)
+
+        from .semantic import get_file_pages_from_database
+
+        if get_file_pages_from_database(candidate, display_root=self.cwd) is not None:
+            return DSLFile(candidate, display_root=self.cwd)
         if not candidate.exists():
             raise DSLRuntimeError(f"File does not exist: {self._display_path(candidate)}")
-        if not candidate.is_file():
-            raise DSLRuntimeError(f"Path is not a file: {self._display_path(candidate)}")
-        return DSLFile(candidate, display_root=self.cwd)
+        raise DSLRuntimeError(f"Path is not a file: {self._display_path(candidate)}")
 
     def _display_path(self, path: Path) -> str:
         try:
