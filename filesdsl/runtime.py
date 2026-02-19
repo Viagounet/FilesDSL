@@ -35,6 +35,7 @@ class DSLFile:
         self._text_chunk_lines = text_chunk_lines
         self.display_root = (display_root or Path.cwd()).resolve()
         self._chunks_cache: list[str] | None = None
+        self._chunks_loaded_from_db = False
 
     def __repr__(self) -> str:
         return f"File('{self._display_path()}')"
@@ -82,12 +83,13 @@ class DSLFile:
 
         entries: list[tuple[int, str, int | None]] = []
         suffix = self.path.suffix.lower()
-        if suffix == ".pdf":
-            entries = self._read_pdf_outline(max_items=max_items)
-        elif suffix == ".docx":
-            entries = self._read_docx_outline(max_items=max_items)
-        elif suffix == ".pptx":
-            entries = self._read_pptx_outline(max_items=max_items)
+        if self.path.exists():
+            if suffix == ".pdf":
+                entries = self._read_pdf_outline(max_items=max_items)
+            elif suffix == ".docx":
+                entries = self._read_docx_outline(max_items=max_items)
+            elif suffix == ".pptx":
+                entries = self._read_pptx_outline(max_items=max_items)
         if not entries:
             entries = self._extract_toc_entries_from_text(max_items=max_items)
         if not entries:
@@ -160,15 +162,22 @@ class DSLFile:
         if self._chunks_cache is not None:
             return self._chunks_cache
 
-        suffix = self.path.suffix.lower()
-        if suffix == ".pdf":
-            chunks = self._read_pdf_pages()
-        elif suffix == ".docx":
-            chunks = self._read_docx_chunks()
-        elif suffix == ".pptx":
-            chunks = self._read_pptx_chunks()
+        from .semantic import get_file_pages_from_database
+
+        db_chunks = get_file_pages_from_database(self.path, display_root=self.display_root)
+        if db_chunks is not None:
+            self._chunks_loaded_from_db = True
+            chunks = db_chunks
         else:
-            chunks = self._read_text_chunks()
+            suffix = self.path.suffix.lower()
+            if suffix == ".pdf":
+                chunks = self._read_pdf_pages()
+            elif suffix == ".docx":
+                chunks = self._read_docx_chunks()
+            elif suffix == ".pptx":
+                chunks = self._read_pptx_chunks()
+            else:
+                chunks = self._read_text_chunks()
         self._chunks_cache = chunks or [""]
         return self._chunks_cache
 
@@ -568,6 +577,16 @@ class DSLDirectory:
         return matches
 
     def _iter_file_paths(self, recursive: bool) -> list[Path]:
+        from .semantic import get_directory_file_paths_from_database
+
+        db_paths = get_directory_file_paths_from_database(
+            self.path,
+            recursive=recursive,
+            display_root=self.display_root,
+        )
+        if db_paths is not None:
+            return db_paths
+
         if recursive:
             paths = [path for path in self.path.rglob("*") if path.is_file()]
         else:

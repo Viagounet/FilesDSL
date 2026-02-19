@@ -17,7 +17,7 @@ class FilesDSLCLITests(unittest.TestCase):
             folder = Path(temp_dir).resolve()
             stats = PrepareStats(
                 folder=folder,
-                db_path=folder / ".fdsl_chroma",
+                db_path=folder / ".fdsl_faiss",
                 indexed_files=3,
                 indexed_pages=9,
             )

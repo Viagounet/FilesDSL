@@ -235,7 +235,10 @@ tree_text = docs.tree(max_entries=3)
         self.assertGreaterEqual(context.exception.column, 1)
 
     def test_docx_file_methods(self) -> None:
-        from docx import Document
+        try:
+            from docx import Document
+        except ModuleNotFoundError:
+            self.skipTest("python-docx is not installed")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -273,7 +276,10 @@ snips = f.snippets("alpha", max_results=1)
             self.assertIn("[page 1]", variables["snips"][0])
 
     def test_pptx_file_methods(self) -> None:
-        from pptx import Presentation
+        try:
+            from pptx import Presentation
+        except ModuleNotFoundError:
+            self.skipTest("python-pptx is not installed")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
