@@ -79,8 +79,14 @@ for file in folder:
 ### Expressions
 Supported operators:
 1. Arithmetic: `+ - * / %`
-2. Comparisons: `== != < <= > >=`
+2. Comparisons: `== != < <= > >= in`
 3. Boolean: `and or not`
+
+Membership notes:
+1. `value in [1, 2, 3]` follows Python list membership semantics.
+2. `"part" in "text"` follows Python substring semantics.
+3. `"part" in File(...)` checks the file name.
+4. `"part" in Directory(...)` checks the directory name.
 
 ### Built-ins
 1. `print(...)`
@@ -140,10 +146,13 @@ print(report.head())
 
 ### `file.read(pages=None)`
 1. `read()` returns full content as one string.
-2. `read(pages=[...])` returns a list of selected pages/chunks.
-3. Default is `pages=None`.
-4. On PPTX, each slide maps to one chunk/page.
-5. On DOCX, chunks are section-like groups based on headings/content.
+2. `read(pages=<int>)` returns a single page/chunk as a string.
+3. `read(pages=[...])` returns a list of selected pages/chunks.
+4. Default is `pages=None`.
+5. On PPTX, each slide maps to one chunk/page.
+6. On DOCX, chunks are section-like groups based on headings/content.
+7. Every returned page/chunk is prefixed as:
+   `[{filename}] => [p.{i}] {content}`
 
 Page selection supports inclusive ranges inside list literals:
 ```fdsl

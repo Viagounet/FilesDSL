@@ -38,6 +38,8 @@ It intentionally exposes only read/search primitives and simple control flow.
   - iterate with `for file in Directory("data")`.
   - `dir.tree(max_depth=5, max_entries=500)` for a quick structure overview.
   - `dir.search("regex", scope="name"|"content"|"both")`.
+- Operator support includes `in` membership (`needle in "text"`, `value in [1, 2]`,
+  `"part" in File(...)`, `"part" in Directory(...)`).
 
 `5:8` inside list literals expands inclusively to `5, 6, 7, 8`.
 

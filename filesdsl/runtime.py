@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import DSLRuntimeError
+from .text_utils import normalize_text
 
 
 def _compile_regex(pattern: str, ignore_case: bool = False) -> re.Pattern[str]:
@@ -44,6 +45,11 @@ class DSLFile:
     def __str__(self) -> str:
         return self._display_path()
 
+    def __contains__(self, item: object) -> bool:
+        if not isinstance(item, str):
+            raise TypeError(f"'in File(...)' requires string left operand, not {type(item).__name__}")
+        return item in self.path.name
+
     def _display_path(self, path: Path | None = None) -> str:
         target = path if path is not None else self.path
         return _render_relative_path(target, self.display_root)
@@ -51,9 +57,19 @@ class DSLFile:
     def read(self, pages=None):
         chunks = self._chunks()
         if pages is None:
-            return "\n\n".join(chunks)
+            return "\n\n".join(
+                self._format_read_chunk(page_index=i, content=chunk)
+                for i, chunk in enumerate(chunks, start=1)
+            )
+        if isinstance(pages, int):
+            selected = self._normalize_pages(pages, total_pages=len(chunks))
+            page_index = selected[0]
+            return self._format_read_chunk(page_index=page_index, content=chunks[page_index - 1])
         selected = self._normalize_pages(pages, total_pages=len(chunks))
-        return [chunks[idx - 1] for idx in selected]
+        return [
+            self._format_read_chunk(page_index=idx, content=chunks[idx - 1])
+            for idx in selected
+        ]
 
     def search(self, pattern: str, ignore_case: bool = False) -> list[int]:
         regex = _compile_regex(pattern, ignore_case=ignore_case)
@@ -159,6 +175,10 @@ class DSLFile:
                 normalized.append(value)
         return normalized
 
+    def _format_read_chunk(self, page_index: int, content: str) -> str:
+        prefix = f"[{self.path.name}] => [p.{page_index}]"
+        return f"{prefix} {content}" if content else prefix
+
     def _chunks(self) -> list[str]:
         if self._chunks_cache is not None:
             return self._chunks_cache
@@ -179,7 +199,8 @@ class DSLFile:
                 chunks = self._read_pptx_chunks()
             else:
                 chunks = self._read_text_chunks()
-        self._chunks_cache = chunks or [""]
+        normalized_chunks = [normalize_text(chunk) for chunk in chunks]
+        self._chunks_cache = normalized_chunks or [""]
         return self._chunks_cache
 
     def _read_pdf_pages(self) -> list[str]:
@@ -478,6 +499,11 @@ class DSLDirectory:
 
     def __str__(self) -> str:
         return self._display_path()
+
+    def __contains__(self, item: object) -> bool:
+        if not isinstance(item, str):
+            raise TypeError(f"'in Directory(...)' requires string left operand, not {type(item).__name__}")
+        return item in self.path.name
 
     def __len__(self) -> int:
         return len(self._iter_file_paths(self.recursive))

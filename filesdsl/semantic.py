@@ -12,6 +12,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 from .errors import DSLRuntimeError
+from .text_utils import normalize_text
 
 
 SEMANTIC_DB_DIRNAME = ".fdsl_faiss"
@@ -50,7 +51,7 @@ def prepare_semantic_database(folder: Path) -> PrepareStats:
         indexed_files += 1
 
         for page_number, page_text in enumerate(pages, start=1):
-            cleaned = page_text.strip()
+            cleaned = normalize_text(page_text).strip()
             records.append(
                 {
                     "relative_path": relative_path,

@@ -115,6 +115,7 @@ class ExpressionLexer:
                     "and": "AND",
                     "or": "OR",
                     "not": "NOT",
+                    "in": "IN",
                     "True": "TRUE",
                     "False": "FALSE",
                     "true": "TRUE",
@@ -236,7 +237,7 @@ class ExpressionParser:
     def _parse_compare(self):
         expr = self._parse_add()
         while True:
-            token = self._match("EQEQ", "NEQ", "LT", "LTE", "GT", "GTE")
+            token = self._match("EQEQ", "NEQ", "LT", "LTE", "GT", "GTE", "IN")
             if token is None:
                 break
             op_map = {
@@ -246,6 +247,7 @@ class ExpressionParser:
                 "LTE": "<=",
                 "GT": ">",
                 "GTE": ">=",
+                "IN": "in",
             }
             right = self._parse_add()
             expr = CompareOp(op_map[token.kind], expr, right, self._loc(token))

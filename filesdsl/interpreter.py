@@ -187,6 +187,11 @@ class Interpreter:
                 return left > right
             if expr.op == ">=":
                 return left >= right
+            if expr.op == "in":
+                try:
+                    return left in right
+                except TypeError as exc:
+                    self._runtime_error(str(exc), expr.loc)
             self._runtime_error(f"Unsupported comparison operator '{expr.op}'", expr.loc)
 
         self._runtime_error("Unsupported expression", expr.loc)

@@ -37,8 +37,14 @@ FilesDSL language specification:
 
 4) Operators
 - Arithmetic: +, -, *, /, %
-- Comparison: ==, !=, <, <=, >, >=
+- Comparison: ==, !=, <, <=, >, >=, in
 - Boolean: and, or, not
+
+Membership examples:
+- value in [1, 2, 3]
+- "abc" in "xyzabc"
+- "report" in File("report.pdf")
+- "data" in Directory("data")
 
 5) List range syntax (inclusive)
 - Inside list literals, start:end expands inclusively.

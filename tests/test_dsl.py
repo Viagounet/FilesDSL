@@ -57,6 +57,40 @@ terms = [
         variables = run_script(script, cwd=Path.cwd(), sandbox_root=Path.cwd())
         self.assertEqual(variables["terms"], ["a", "b", "c", "d"])
 
+    def test_in_operator_for_lists_and_strings(self) -> None:
+        script = """
+values = [1, 2, 3]
+has_two = 2 in values
+has_four = 4 in values
+text = "alphabet"
+has_alpha = "alpha" in text
+has_zeta = "zeta" in text
+"""
+        variables = run_script(script, cwd=Path.cwd(), sandbox_root=Path.cwd())
+        self.assertTrue(variables["has_two"])
+        self.assertFalse(variables["has_four"])
+        self.assertTrue(variables["has_alpha"])
+        self.assertFalse(variables["has_zeta"])
+
+    def test_in_operator_for_file_and_directory_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "alpha.txt").write_text("content", encoding="utf-8")
+            (root / "reports").mkdir()
+            script = """
+f = File("alpha.txt")
+d = Directory("reports")
+file_hit = "alp" in f
+file_miss = "zzz" in f
+dir_hit = "rep" in d
+dir_miss = "zzz" in d
+"""
+            variables = run_script(script, cwd=root, sandbox_root=root)
+            self.assertTrue(variables["file_hit"])
+            self.assertFalse(variables["file_miss"])
+            self.assertTrue(variables["dir_hit"])
+            self.assertFalse(variables["dir_miss"])
+
     def test_directory_search_and_file_api(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -124,6 +158,39 @@ first = f.head()
             self.assertTrue(variables["has_alpha"])
             self.assertEqual(variables["alpha_pages"], [1])
             self.assertIn("alpha", variables["first"])
+
+    def test_text_normalization_cleans_unicode_whitespace_and_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "unicode.txt").write_text("alpha\u00A0beta\x07\nline\u202Ftwo\n", encoding="utf-8")
+            script = """
+f = File("unicode.txt")
+content = f.read()
+has_space_query = f.contains("alpha beta")
+"""
+            variables = run_script(script, cwd=root, sandbox_root=root)
+            self.assertNotIn("\u00A0", variables["content"])
+            self.assertNotIn("\u202F", variables["content"])
+            self.assertNotIn("\x07", variables["content"])
+            self.assertIn("alpha beta", variables["content"])
+            self.assertIn("line two", variables["content"])
+            self.assertTrue(variables["has_space_query"])
+
+    def test_file_read_with_integer_page_returns_string(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "single.txt").write_text("line1\nline2\n", encoding="utf-8")
+            script = """
+f = File("single.txt")
+page = f.read(pages=1)
+pages = f.read(pages=[1])
+"""
+            variables = run_script(script, cwd=root, sandbox_root=root)
+            self.assertIsInstance(variables["page"], str)
+            self.assertTrue(variables["page"].startswith("[single.txt] => [p.1] "))
+            self.assertIn("line1", variables["page"])
+            self.assertEqual(len(variables["pages"]), 1)
+            self.assertTrue(variables["pages"][0].startswith("[single.txt] => [p.1] "))
 
     def test_semantic_search_file_method(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
