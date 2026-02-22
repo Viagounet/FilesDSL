@@ -23,7 +23,8 @@ from .ast_nodes import (
     Statement,
     UnaryOp,
 )
-from .errors import DSLRuntimeError, SourceLocation
+from .errors import DSLRuntimeError, DSLTimeoutError, SourceLocation
+from .execution_budget import ExecutionBudget
 from .parser import Parser
 from .runtime import DSLDirectory, DSLFile
 
@@ -36,12 +37,14 @@ class Interpreter:
         cwd: Path | None = None,
         sandbox_root: Path | None = None,
         stdout: TextIO | None = None,
+        budget: ExecutionBudget | None = None,
     ) -> None:
         self.source = source
         self.source_lines = source.splitlines()
         self.cwd = (cwd or Path.cwd()).resolve()
         self.sandbox_root = (sandbox_root or self.cwd).resolve()
         self.stdout = stdout if stdout is not None else sys.stdout
+        self.budget = budget if budget is not None else ExecutionBudget(timeout_s=None)
         self.variables: dict[str, Any] = {}
         self.builtins = {
             "Directory": self._builtin_directory,
@@ -57,9 +60,11 @@ class Interpreter:
 
     def _execute_program(self, program: Program) -> None:
         for statement in program.statements:
+            self.budget.check("execute_program")
             self._execute_statement(statement)
 
     def _execute_statement(self, stmt: Statement) -> None:
+        self.budget.check("execute_statement")
         try:
             if isinstance(stmt, Assign):
                 self.variables[stmt.name] = self._eval_expr(stmt.expr)
@@ -74,6 +79,7 @@ class Interpreter:
                 if not hasattr(iterable, "__iter__"):
                     self._runtime_error("for-loop target is not iterable", stmt.loc)
                 for value in iterable:
+                    self.budget.check("execute_statement.for_iteration")
                     self.variables[stmt.var_name] = value
                     for child_stmt in stmt.body:
                         self._execute_statement(child_stmt)
@@ -97,6 +103,7 @@ class Interpreter:
             self._runtime_error(str(exc), stmt.loc)
 
     def _eval_expr(self, expr):
+        self.budget.check("eval_expr")
         if isinstance(expr, Literal):
             return expr.value
 
@@ -123,13 +130,21 @@ class Interpreter:
             return getattr(obj, expr.name)
 
         if isinstance(expr, Call):
+            self.budget.check("eval_expr.call")
             callee = self._eval_expr(expr.callee)
             if not callable(callee):
                 self._runtime_error("Attempted to call a non-callable value", expr.loc)
 
-            args = [self._eval_expr(arg) for arg in expr.args]
-            kwargs = {name: self._eval_expr(value) for name, value in expr.kwargs}
+            args = []
+            for arg in expr.args:
+                self.budget.check("eval_expr.call.arg")
+                args.append(self._eval_expr(arg))
+            kwargs = {}
+            for name, value in expr.kwargs:
+                self.budget.check("eval_expr.call.kwarg")
+                kwargs[name] = self._eval_expr(value)
             try:
+                self.budget.check("eval_expr.call.invoke")
                 return callee(*args, **kwargs)
             except TypeError as exc:
                 self._runtime_error(f"Call failed: {exc}", expr.loc)
@@ -199,6 +214,7 @@ class Interpreter:
     def _eval_list_literal(self, node: ListLiteral) -> list[Any]:
         values: list[Any] = []
         for item in node.items:
+            self.budget.check("eval_list_literal.item")
             if isinstance(item, RangeItem):
                 start = self._eval_expr(item.start)
                 end = self._eval_expr(item.end)
@@ -216,17 +232,29 @@ class Interpreter:
         candidate = self._resolve_sandboxed_path(path, "Directory")
         if not isinstance(recursive, bool):
             raise DSLRuntimeError("Directory(..., recursive=...) expects a boolean")
-        return DSLDirectory(candidate, recursive=recursive, display_root=self.cwd)
+        return DSLDirectory(
+            candidate,
+            recursive=recursive,
+            display_root=self.cwd,
+            budget=self.budget,
+        )
 
     def _builtin_file(self, path: str):
         candidate = self._resolve_sandboxed_path(path, "File")
         if candidate.exists() and candidate.is_file():
-            return DSLFile(candidate, display_root=self.cwd)
+            return DSLFile(candidate, display_root=self.cwd, budget=self.budget)
 
         from .semantic import get_file_pages_from_database
 
-        if get_file_pages_from_database(candidate, display_root=self.cwd) is not None:
-            return DSLFile(candidate, display_root=self.cwd)
+        if (
+            get_file_pages_from_database(
+                candidate,
+                display_root=self.cwd,
+                budget=self.budget,
+            )
+            is not None
+        ):
+            return DSLFile(candidate, display_root=self.cwd, budget=self.budget)
         if not candidate.exists():
             raise DSLRuntimeError(f"File does not exist: {self._display_path(candidate)}")
         raise DSLRuntimeError(f"Path is not a file: {self._display_path(candidate)}")
@@ -284,8 +312,15 @@ def run_script(
     cwd: Path | None = None,
     sandbox_root: Path | None = None,
     stdout: TextIO | None = None,
+    budget: ExecutionBudget | None = None,
 ) -> dict[str, Any]:
-    interpreter = Interpreter(source, cwd=cwd, sandbox_root=sandbox_root, stdout=stdout)
+    interpreter = Interpreter(
+        source,
+        cwd=cwd,
+        sandbox_root=sandbox_root,
+        stdout=stdout,
+        budget=budget,
+    )
     return interpreter.run()
 
 
@@ -294,6 +329,7 @@ def execute_fdsl(
     *,
     cwd: str | Path | None = None,
     sandbox_root: str | Path | None = None,
+    timeout_s: float | None = None,
 ) -> str:
     """Execute FDSL code provided as a Python string.
 
@@ -301,6 +337,7 @@ def execute_fdsl(
         code: FDSL source code to execute.
         cwd: Base directory used to resolve relative paths in Directory(...).
         sandbox_root: Path boundary for directory access. Defaults to cwd.
+        timeout_s: Optional cooperative timeout budget in seconds.
 
     Returns:
         The execution history captured from stdout (console prints).
@@ -308,5 +345,16 @@ def execute_fdsl(
     resolved_cwd = Path(cwd).resolve() if cwd is not None else None
     resolved_sandbox = Path(sandbox_root).resolve() if sandbox_root is not None else None
     output = StringIO()
-    run_script(code, cwd=resolved_cwd, sandbox_root=resolved_sandbox, stdout=output)
-    return output.getvalue()
+    budget = ExecutionBudget(timeout_s=timeout_s)
+    try:
+        run_script(
+            code,
+            cwd=resolved_cwd,
+            sandbox_root=resolved_sandbox,
+            stdout=output,
+            budget=budget,
+        )
+        return output.getvalue()
+    except DSLTimeoutError as exc:
+        exc.partial_output = output.getvalue()
+        raise

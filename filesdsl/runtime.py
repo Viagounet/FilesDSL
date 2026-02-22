@@ -5,7 +5,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .errors import DSLRuntimeError
+from .errors import DSLRuntimeError, DSLTimeoutError
+from .execution_budget import ExecutionBudget
 from .text_utils import normalize_text
 
 
@@ -32,10 +33,12 @@ class DSLFile:
         path: Path,
         text_chunk_lines: int = 80,
         display_root: Path | None = None,
+        budget: ExecutionBudget | None = None,
     ) -> None:
         self.path = path
         self._text_chunk_lines = text_chunk_lines
         self.display_root = (display_root or Path.cwd()).resolve()
+        self.budget = budget
         self._chunks_cache: list[str] | None = None
         self._chunks_loaded_from_db = False
 
@@ -54,7 +57,13 @@ class DSLFile:
         target = path if path is not None else self.path
         return _render_relative_path(target, self.display_root)
 
+    def _check_budget(self, phase: str) -> None:
+        if self.budget is None:
+            return
+        self.budget.check(phase)
+
     def read(self, pages=None):
+        self._check_budget("file.read")
         chunks = self._chunks()
         if pages is None:
             return "\n\n".join(
@@ -72,9 +81,11 @@ class DSLFile:
         ]
 
     def search(self, pattern: str, ignore_case: bool = False) -> list[int]:
+        self._check_budget("file.search")
         regex = _compile_regex(pattern, ignore_case=ignore_case)
         matches = []
         for page_index, chunk in enumerate(self._chunks(), start=1):
+            self._check_budget("file.search.chunk")
             if regex.search(chunk):
                 matches.append(page_index)
         return matches
@@ -83,18 +94,21 @@ class DSLFile:
         return bool(self.search(pattern, ignore_case=ignore_case))
 
     def head(self):
+        self._check_budget("file.head")
         chunks = self._chunks()
         if not chunks:
             return ""
         return chunks[0]
 
     def tail(self):
+        self._check_budget("file.tail")
         chunks = self._chunks()
         if not chunks:
             return ""
         return chunks[-1]
 
     def table(self, max_items: int = 50) -> str:
+        self._check_budget("file.table")
         if not isinstance(max_items, int) or max_items < 1:
             raise DSLRuntimeError("max_items must be a positive integer")
 
@@ -129,6 +143,7 @@ class DSLFile:
             query=query,
             top_k=top_k,
             display_root=self.display_root,
+            budget=self.budget,
         )
 
     def snippets(
@@ -138,6 +153,7 @@ class DSLFile:
         context_chars: int = 80,
         ignore_case: bool = False,
     ) -> list[str]:
+        self._check_budget("file.snippets")
         if not isinstance(max_results, int) or max_results < 1:
             raise DSLRuntimeError("max_results must be a positive integer")
         if not isinstance(context_chars, int) or context_chars < 0:
@@ -146,6 +162,7 @@ class DSLFile:
 
         snippets: list[str] = []
         for page_index, chunk in enumerate(self._chunks(), start=1):
+            self._check_budget("file.snippets.chunk")
             for match in regex.finditer(chunk):
                 start = max(match.start() - context_chars, 0)
                 end = min(match.end() + context_chars, len(chunk))
@@ -156,6 +173,7 @@ class DSLFile:
         return snippets
 
     def _normalize_pages(self, pages, total_pages: int) -> list[int]:
+        self._check_budget("file.normalize_pages")
         if isinstance(pages, int):
             pages_values = [pages]
         elif isinstance(pages, list):
@@ -165,6 +183,7 @@ class DSLFile:
 
         normalized: list[int] = []
         for value in pages_values:
+            self._check_budget("file.normalize_pages.item")
             if not isinstance(value, int):
                 raise DSLRuntimeError("pages list must contain only integers")
             if value < 1 or value > total_pages:
@@ -180,12 +199,17 @@ class DSLFile:
         return f"{prefix} {content}" if content else prefix
 
     def _chunks(self) -> list[str]:
+        self._check_budget("file.chunks")
         if self._chunks_cache is not None:
             return self._chunks_cache
 
         from .semantic import get_file_pages_from_database
 
-        db_chunks = get_file_pages_from_database(self.path, display_root=self.display_root)
+        db_chunks = get_file_pages_from_database(
+            self.path,
+            display_root=self.display_root,
+            budget=self.budget,
+        )
         if db_chunks is not None:
             self._chunks_loaded_from_db = True
             chunks = db_chunks
@@ -199,11 +223,15 @@ class DSLFile:
                 chunks = self._read_pptx_chunks()
             else:
                 chunks = self._read_text_chunks()
-        normalized_chunks = [normalize_text(chunk) for chunk in chunks]
+        normalized_chunks: list[str] = []
+        for chunk in chunks:
+            self._check_budget("file.chunks.normalize")
+            normalized_chunks.append(normalize_text(chunk))
         self._chunks_cache = normalized_chunks or [""]
         return self._chunks_cache
 
     def _read_pdf_pages(self) -> list[str]:
+        self._check_budget("file.read_pdf")
         try:
             import pymupdf
         except ImportError as exc:
@@ -213,13 +241,19 @@ class DSLFile:
 
         try:
             with pymupdf.open(str(self.path)) as doc:
-                pages = [page.get_text("text").strip() for page in doc]
+                pages: list[str] = []
+                for page in doc:
+                    self._check_budget("file.read_pdf.page")
+                    pages.append(page.get_text("text").strip())
+        except DSLTimeoutError:
+            raise
         except Exception as exc:
             raise DSLRuntimeError(f"Failed to read PDF '{self.path.name}': {exc}") from exc
 
         return pages or [""]
 
     def _read_pdf_outline(self, max_items: int) -> list[tuple[int, str, int | None]]:
+        self._check_budget("file.read_pdf_outline")
         try:
             import pymupdf
         except ImportError as exc:
@@ -235,6 +269,7 @@ class DSLFile:
 
         entries: list[tuple[int, str, int | None]] = []
         for item in raw_toc:
+            self._check_budget("file.read_pdf_outline.item")
             if not isinstance(item, (list, tuple)) or len(item) < 3:
                 continue
             raw_level, raw_title, raw_page = item[0], item[1], item[2]
@@ -258,6 +293,7 @@ class DSLFile:
         return entries
 
     def _read_docx_chunks(self) -> list[str]:
+        self._check_budget("file.read_docx")
         try:
             import docx
         except ImportError as exc:
@@ -282,6 +318,7 @@ class DSLFile:
             current_lines.clear()
 
         for para in doc.paragraphs:
+            self._check_budget("file.read_docx.paragraph")
             text = para.text.strip()
             if not text:
                 continue
@@ -294,8 +331,10 @@ class DSLFile:
             current_lines.append(text)
 
         for table in doc.tables:
+            self._check_budget("file.read_docx.table")
             rows: list[str] = []
             for row in table.rows:
+                self._check_budget("file.read_docx.table_row")
                 cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
                 if cells:
                     rows.append(" | ".join(cells))
@@ -307,6 +346,7 @@ class DSLFile:
         return chunks or [""]
 
     def _read_docx_outline(self, max_items: int) -> list[tuple[int, str, int | None]]:
+        self._check_budget("file.read_docx_outline")
         try:
             import docx
         except ImportError as exc:
@@ -321,6 +361,7 @@ class DSLFile:
 
         entries: list[tuple[int, str, int | None]] = []
         for para in doc.paragraphs:
+            self._check_budget("file.read_docx_outline.paragraph")
             text = para.text.strip()
             if not text:
                 continue
@@ -335,6 +376,7 @@ class DSLFile:
         return entries
 
     def _read_pptx_chunks(self) -> list[str]:
+        self._check_budget("file.read_pptx")
         try:
             from pptx import Presentation
         except ImportError as exc:
@@ -349,8 +391,10 @@ class DSLFile:
 
         chunks: list[str] = []
         for index, slide in enumerate(presentation.slides, start=1):
+            self._check_budget("file.read_pptx.slide")
             lines: list[str] = []
             for shape in slide.shapes:
+                self._check_budget("file.read_pptx.shape")
                 if not hasattr(shape, "has_text_frame") or not shape.has_text_frame:
                     continue
                 text = shape.text.strip()
@@ -366,6 +410,7 @@ class DSLFile:
                 if notes_text:
                     lines.append("[Notes]")
                     for line in notes_text.splitlines():
+                        self._check_budget("file.read_pptx.notes_line")
                         stripped = line.strip()
                         if stripped:
                             lines.append(stripped)
@@ -376,6 +421,7 @@ class DSLFile:
         return chunks or [""]
 
     def _read_pptx_outline(self, max_items: int) -> list[tuple[int, str, int | None]]:
+        self._check_budget("file.read_pptx_outline")
         try:
             from pptx import Presentation
         except ImportError as exc:
@@ -390,11 +436,13 @@ class DSLFile:
 
         entries: list[tuple[int, str, int | None]] = []
         for index, slide in enumerate(presentation.slides, start=1):
+            self._check_budget("file.read_pptx_outline.slide")
             title = ""
             if slide.shapes.title and slide.shapes.title.text:
                 title = slide.shapes.title.text.strip()
             if not title:
                 for shape in slide.shapes:
+                    self._check_budget("file.read_pptx_outline.shape")
                     if not hasattr(shape, "has_text_frame") or not shape.has_text_frame:
                         continue
                     text = shape.text.strip()
@@ -410,6 +458,7 @@ class DSLFile:
         return entries
 
     def _extract_toc_entries_from_text(self, max_items: int) -> list[tuple[int, str, int | None]]:
+        self._check_budget("file.extract_toc")
         numbered_dotted = re.compile(r"^(\d+(?:\.\d+)*)\s+(.+?)\.{2,}\s*(\d+)$")
         numbered_plain = re.compile(r"^(\d+(?:\.\d+)*)\s+(.+?)\s+(\d+)$")
         titled_dotted = re.compile(r"^(.+?)\.{2,}\s*(\d+)$")
@@ -417,7 +466,9 @@ class DSLFile:
         seen: set[tuple[int, str, int | None]] = set()
 
         for chunk in self._chunks()[:8]:
+            self._check_budget("file.extract_toc.chunk")
             for raw_line in chunk.splitlines():
+                self._check_budget("file.extract_toc.line")
                 line = raw_line.strip()
                 if len(line) < 8:
                     continue
@@ -459,6 +510,7 @@ class DSLFile:
         return "\n".join(lines)
 
     def _read_text_chunks(self) -> list[str]:
+        self._check_budget("file.read_text")
         try:
             text = self.path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
@@ -473,6 +525,7 @@ class DSLFile:
 
         chunks: list[str] = []
         for start in range(0, len(lines), self._text_chunk_lines):
+            self._check_budget("file.read_text.chunk")
             block = "\n".join(lines[start : start + self._text_chunk_lines]).strip()
             chunks.append(block)
         return chunks or [text]
@@ -484,8 +537,10 @@ class DSLDirectory:
         path: Path,
         recursive: bool = True,
         display_root: Path | None = None,
+        budget: ExecutionBudget | None = None,
     ) -> None:
         self.display_root = (display_root or Path.cwd()).resolve()
+        self.budget = budget
         if path.exists():
             if not path.is_dir():
                 raise DSLRuntimeError(f"Path is not a directory: {self._display_path(path)}")
@@ -506,26 +561,36 @@ class DSLDirectory:
         return item in self.path.name
 
     def __len__(self) -> int:
+        self._check_budget("directory.len")
         return len(self._iter_file_paths(self.recursive))
 
     def _display_path(self, path: Path | None = None) -> str:
         target = path if path is not None else self.path
         return _render_relative_path(target, self.display_root)
 
+    def _check_budget(self, phase: str) -> None:
+        if self.budget is None:
+            return
+        self.budget.check(phase)
+
     def __iter__(self):
+        self._check_budget("directory.iter")
         files = self._iter_file_paths(self.recursive)
         for file_path in files:
-            yield DSLFile(file_path, display_root=self.display_root)
+            self._check_budget("directory.iter.file")
+            yield DSLFile(file_path, display_root=self.display_root, budget=self.budget)
 
     def files(self, recursive: bool | None = None) -> list[DSLFile]:
+        self._check_budget("directory.files")
         if recursive is None:
             recursive = self.recursive
         return [
-            DSLFile(path, display_root=self.display_root)
+            DSLFile(path, display_root=self.display_root, budget=self.budget)
             for path in self._iter_file_paths(recursive)
         ]
 
     def tree(self, max_depth: int = 5, max_entries: int = 500) -> str:
+        self._check_budget("directory.tree")
         if not isinstance(max_depth, int) or max_depth < 0:
             raise DSLRuntimeError("max_depth must be a non-negative integer")
         if not isinstance(max_entries, int) or max_entries < 1:
@@ -537,6 +602,7 @@ class DSLDirectory:
             self.path,
             recursive=True,
             display_root=self.display_root,
+            budget=self.budget,
         )
         if db_paths is not None:
             return self._render_tree_from_paths(db_paths, max_depth=max_depth, max_entries=max_entries)
@@ -547,6 +613,7 @@ class DSLDirectory:
 
         def walk(current: Path, depth: int) -> bool:
             nonlocal emitted, truncated
+            self._check_budget("directory.tree.walk")
             if depth >= max_depth:
                 return True
 
@@ -561,6 +628,7 @@ class DSLDirectory:
                 return emitted < max_entries
 
             for entry in entries:
+                self._check_budget("directory.tree.entry")
                 if emitted >= max_entries:
                     truncated = True
                     return False
@@ -585,12 +653,14 @@ class DSLDirectory:
         max_depth: int,
         max_entries: int,
     ) -> str:
+        self._check_budget("directory.render_tree")
         root: dict[str, dict[str, Any] | set[str]] = {
             "dirs": {},
             "files": set(),
         }
 
         for path in paths:
+            self._check_budget("directory.render_tree.path")
             try:
                 relative_path = path.relative_to(self.path)
             except ValueError:
@@ -615,6 +685,7 @@ class DSLDirectory:
 
         def walk(node: dict[str, dict[str, Any] | set[str]], depth: int) -> bool:
             nonlocal emitted, truncated
+            self._check_budget("directory.render_tree.walk")
             if depth >= max_depth:
                 return True
 
@@ -627,6 +698,7 @@ class DSLDirectory:
             file_items = sorted(files, key=lambda item: item.lower())
 
             for name, child in dir_items:
+                self._check_budget("directory.render_tree.dir")
                 if emitted >= max_entries:
                     truncated = True
                     return False
@@ -637,6 +709,7 @@ class DSLDirectory:
                         return False
 
             for name in file_items:
+                self._check_budget("directory.render_tree.file")
                 if emitted >= max_entries:
                     truncated = True
                     return False
@@ -657,6 +730,7 @@ class DSLDirectory:
         recursive: bool | None = None,
         ignore_case: bool = False,
     ) -> list[DSLFile]:
+        self._check_budget("directory.search")
         if recursive is None:
             recursive = self.recursive
         if in_content:
@@ -666,11 +740,12 @@ class DSLDirectory:
 
         regex = _compile_regex(pattern, ignore_case=ignore_case)
         files = [
-            DSLFile(path, display_root=self.display_root)
+            DSLFile(path, display_root=self.display_root, budget=self.budget)
             for path in self._iter_file_paths(recursive)
         ]
         matches: list[DSLFile] = []
         for file in files:
+            self._check_budget("directory.search.file")
             relative = file.path.relative_to(self.path).as_posix()
             name_match = bool(regex.search(file.path.name) or regex.search(relative))
             content_match = False
@@ -686,20 +761,30 @@ class DSLDirectory:
         return matches
 
     def _iter_file_paths(self, recursive: bool) -> list[Path]:
+        self._check_budget("directory.iter_paths")
         from .semantic import get_directory_file_paths_from_database
 
         db_paths = get_directory_file_paths_from_database(
             self.path,
             recursive=recursive,
             display_root=self.display_root,
+            budget=self.budget,
         )
         if db_paths is not None:
             return db_paths
 
         if recursive:
-            paths = [path for path in self.path.rglob("*") if path.is_file()]
+            paths: list[Path] = []
+            for path in self.path.rglob("*"):
+                self._check_budget("directory.iter_paths.recursive")
+                if path.is_file():
+                    paths.append(path)
         else:
-            paths = [path for path in self.path.glob("*") if path.is_file()]
+            paths = []
+            for path in self.path.glob("*"):
+                self._check_budget("directory.iter_paths.flat")
+                if path.is_file():
+                    paths.append(path)
         paths.sort(key=lambda p: p.as_posix())
         return paths
 
@@ -710,5 +795,6 @@ class DSLDirectory:
             path,
             recursive=True,
             display_root=self.display_root,
+            budget=self.budget,
         )
         return bool(db_paths)

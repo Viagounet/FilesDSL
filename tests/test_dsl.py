@@ -3,12 +3,15 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from filesdsl.errors import DSLRuntimeError, DSLSyntaxError
+from filesdsl.errors import DSLRuntimeError, DSLSyntaxError, DSLTimeoutError
+from filesdsl.execution_budget import ExecutionBudget
 from filesdsl.interpreter import execute_fdsl, run_script
+from filesdsl.runtime import DSLFile
 
 
 class FilesDSLTests(unittest.TestCase):
@@ -39,6 +42,54 @@ class FilesDSLTests(unittest.TestCase):
         output = StringIO()
         run_script('print("alpha", 1)\n', cwd=root, sandbox_root=root, stdout=output)
         self.assertEqual(output.getvalue(), "alpha 1\n")
+
+    def test_run_script_timeout_raises_dsl_timeout_error(self) -> None:
+        root = Path.cwd()
+        budget = ExecutionBudget(timeout_s=0.0)
+        with self.assertRaises(DSLTimeoutError) as context:
+            run_script("x = 1\n", cwd=root, sandbox_root=root, budget=budget)
+
+        self.assertIn("Timed out after", str(context.exception))
+        self.assertEqual(context.exception.phase, "execute_program")
+        self.assertGreaterEqual(context.exception.elapsed_s, 0.0)
+
+    def test_execute_fdsl_timeout_in_content_search_reports_phase_and_partial_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "a.txt").write_text("alpha", encoding="utf-8")
+            (root / "b.txt").write_text("beta", encoding="utf-8")
+
+            script = """
+print("before-search")
+docs = Directory(".")
+hits = docs.search("gamma", scope="content")
+print("after-search")
+"""
+
+            original_contains = DSLFile.contains
+
+            def slow_contains(self, pattern, ignore_case=False):
+                time.sleep(0.01)
+                return original_contains(self, pattern, ignore_case=ignore_case)
+
+            with patch("filesdsl.runtime.DSLFile.contains", new=slow_contains):
+                with self.assertRaises(DSLTimeoutError) as context:
+                    execute_fdsl(script, cwd=root, sandbox_root=root, timeout_s=0.005)
+
+            exc = context.exception
+            self.assertIn("Timed out after", str(exc))
+            self.assertIn("in ", str(exc))
+            self.assertRegex(str(exc), r"in (directory\.search\.file|file\.search(?:\.chunk)?)$")
+            self.assertGreater(exc.elapsed_s, 0.0)
+            self.assertIsNotNone(exc.partial_output)
+            self.assertIn("before-search", exc.partial_output or "")
+            self.assertNotIn("after-search", exc.partial_output or "")
+
+    def test_execute_fdsl_timeout_api_is_stable_over_many_calls(self) -> None:
+        root = Path.cwd()
+        for _ in range(100):
+            output = execute_fdsl('print("ok")\n', cwd=root, sandbox_root=root, timeout_s=1.0)
+            self.assertEqual(output, "ok\n")
 
     def test_range_syntax_in_lists(self) -> None:
         script = "pages = [1, 5:8, 15]\n"

@@ -55,3 +55,18 @@ class DSLRuntimeError(DSLBaseError):
             f"    {self.source_line}\n"
             f"    {pointer}"
         )
+
+
+class DSLTimeoutError(DSLRuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        elapsed_s: float,
+        phase: str,
+        partial_output: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.elapsed_s = elapsed_s
+        self.phase = phase
+        self.partial_output = partial_output
