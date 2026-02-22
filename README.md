@@ -30,7 +30,7 @@ It intentionally exposes only read/search primitives and simple control flow.
     followed by an indented TOC tree with page numbers when available.
     If none is found, it returns: `No table of contents detected for {file}`.
   - `file.semantic_search(query, top_k=5)` semantic retrieval over prepared embeddings.
-    Returns the most similar page numbers in that file.
+    Returns the top matching chunks directly (`[file] => [p.n] <chunk>`).
   - `file.snippets("regex")` returns short excerpts.
 
 `file` methods work across PDF, DOCX, PPTX, and plain-text files.
@@ -38,6 +38,7 @@ It intentionally exposes only read/search primitives and simple control flow.
   - iterate with `for file in Directory("data")`.
   - `dir.tree(max_depth=5, max_entries=500)` for a quick structure overview.
   - `dir.search("regex", scope="name"|"content"|"both")`.
+  - `dir.semantic_search(query, top_k=5, recursive=None)` for semantic chunk retrieval.
 - Operator support includes `in` membership (`needle in "text"`, `value in [1, 2]`,
   `"part" in File(...)`, `"part" in Directory(...)`).
 

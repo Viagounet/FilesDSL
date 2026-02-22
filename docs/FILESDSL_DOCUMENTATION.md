@@ -124,6 +124,17 @@ Notes:
 5. `scope="both"` checks either.
 6. `recursive=None` means "use the directory object's own recursive setting".
 
+### `dir.semantic_search(query, top_k=5, recursive=None) -> list[string]`
+Returns top semantic chunk matches for a natural-language query across files in the directory.
+
+Notes:
+1. Requires a prepared semantic index: `fdsl prepare <folder>`.
+2. `query` must be a non-empty string.
+3. `top_k` must be a positive integer.
+4. `recursive=None` means "use the directory object's own recursive setting".
+5. Results are returned as formatted chunks ordered by descending similarity:
+   `[relative/path.ext] => [p.<n>] <chunk-text>`
+
 ### `dir.tree(max_depth=5, max_entries=500) -> string`
 Returns an indented textual tree of directories/files rooted at this directory.
 
@@ -175,14 +186,16 @@ Returns last page/chunk.
 ### `file.snippets(pattern, max_results=5, context_chars=80, ignore_case=false) -> list[string]`
 Returns contextual snippets for each regex match.
 
-### `file.semantic_search(query, top_k=5) -> list[int]`
-Runs semantic retrieval over a prepared ChromaDB index and returns the top-k
-most similar page/chunk numbers for this file.
+### `file.semantic_search(query, top_k=5) -> list[string]`
+Runs semantic retrieval over a prepared index and returns the top-k
+most similar chunks for this file.
 
 Notes:
 1. `query` must be a non-empty string.
 2. `top_k` must be a positive integer.
-3. Requires a previously prepared index with:
+3. Returns formatted chunks:
+   `[filename.ext] => [p.<n>] <chunk-text>`
+4. Requires a previously prepared index with:
    `fdsl prepare <folder>`
 
 ### `file.table(max_items=50) -> string`
@@ -210,13 +223,14 @@ No table of contents detected for <file-path>
 2. `File(path)` (no optional defaults; `path` is required)
 3. `dir.files(recursive=None)` where `None` => directory default
 4. `dir.search(pattern, scope="name", in_content=false, recursive=None, ignore_case=false)`
-5. `dir.tree(max_depth=5, max_entries=500)`
-6. `file.read(pages=None)`
-7. `file.search(pattern, ignore_case=false)`
-8. `file.contains(pattern, ignore_case=false)`
-9. `file.snippets(pattern, max_results=5, context_chars=80, ignore_case=false)`
-10. `file.semantic_search(query, top_k=5)`
-11. `file.table(max_items=50)`
+5. `dir.semantic_search(query, top_k=5, recursive=None)`
+6. `dir.tree(max_depth=5, max_entries=500)`
+7. `file.read(pages=None)`
+8. `file.search(pattern, ignore_case=false)`
+9. `file.contains(pattern, ignore_case=false)`
+10. `file.snippets(pattern, max_results=5, context_chars=80, ignore_case=false)`
+11. `file.semantic_search(query, top_k=5)`
+12. `file.table(max_items=50)`
 
 ## Format Handling
 PDF parsing uses `pymupdf` (PyMuPDF):

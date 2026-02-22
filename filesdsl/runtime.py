@@ -130,21 +130,25 @@ class DSLFile:
             f"{self._format_toc_tree(entries)}"
         )
 
-    def semantic_search(self, query: str, top_k: int = 5) -> list[int]:
+    def semantic_search(self, query: str, top_k: int = 5) -> list[str]:
         if not isinstance(query, str) or query.strip() == "":
             raise DSLRuntimeError("query must be a non-empty string")
         if not isinstance(top_k, int) or top_k < 1:
             raise DSLRuntimeError("top_k must be a positive integer")
 
-        from .semantic import semantic_search_file_pages
+        from .semantic import semantic_search_file_chunks
 
-        return semantic_search_file_pages(
+        chunks = semantic_search_file_chunks(
             file_path=self.path,
             query=query,
             top_k=top_k,
             display_root=self.display_root,
             budget=self.budget,
         )
+        return [
+            self._format_read_chunk(page_index=page_index, content=content)
+            for page_index, content in chunks
+        ]
 
     def snippets(
         self,
@@ -759,6 +763,40 @@ class DSLDirectory:
             elif scope == "both" and (name_match or content_match):
                 matches.append(file)
         return matches
+
+    def semantic_search(
+        self,
+        query: str,
+        top_k: int = 5,
+        recursive: bool | None = None,
+    ) -> list[str]:
+        self._check_budget("directory.semantic_search")
+        if not isinstance(query, str) or query.strip() == "":
+            raise DSLRuntimeError("query must be a non-empty string")
+        if not isinstance(top_k, int) or top_k < 1:
+            raise DSLRuntimeError("top_k must be a positive integer")
+        if recursive is None:
+            recursive = self.recursive
+        if not isinstance(recursive, bool):
+            raise DSLRuntimeError("recursive must be a boolean")
+
+        from .semantic import semantic_search_directory_chunks
+
+        chunks = semantic_search_directory_chunks(
+            directory_path=self.path,
+            query=query,
+            top_k=top_k,
+            recursive=recursive,
+            display_root=self.display_root,
+            budget=self.budget,
+        )
+        results: list[str] = []
+        for path, page, content in chunks:
+            self._check_budget("directory.semantic_search.result")
+            display_path = self._display_path(path)
+            prefix = f"[{display_path}] => [p.{page}]"
+            results.append(f"{prefix} {content}" if content else prefix)
+        return results
 
     def _iter_file_paths(self, recursive: bool) -> list[Path]:
         self._check_budget("directory.iter_paths")

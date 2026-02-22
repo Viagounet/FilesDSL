@@ -18,6 +18,7 @@ Inside it, FilesDSL stores:
 
 - `records.json`: one record per extracted page/chunk
 - `vectors.json`: one embedding vector per record
+- `meta.json`: embedding metadata/version used to validate vector compatibility
 - `pages.faiss`: FAISS marker/index file used to represent the FAISS-backed store
 
 Each `records.json` record stores:
@@ -92,15 +93,29 @@ This lets scripts keep operating on indexed files even if the original files are
 
 ---
 
-## 4) Semantic search flow (`file.semantic_search(...)`)
+## 4) Semantic search flow (`file.semantic_search(...)` / `dir.semantic_search(...)`)
 
-`semantic_search_file_pages(...)`:
+`semantic_search_file_chunks(...)`:
 
 1. Finds the nearest indexed root containing `.fdsl_faiss`
 2. Loads `records.json` + `vectors.json`
-3. Filters records to the requested file path
-4. Scores by dot-product similarity
-5. Returns top-k page numbers
+3. Auto-rebuilds vectors when legacy/incompatible metadata is detected
+4. Filters records to the requested file path
+5. Scores by dot-product similarity
+6. Returns top-k chunks with page numbers
+
+Embeddings now use a deterministic token hashing strategy (`blake2b` buckets), so
+prepare-time and query-time vectors stay compatible across different Python processes.
+Legacy indexes are upgraded automatically on first semantic query.
+
+`semantic_search_directory_chunks(...)`:
+
+1. Finds the nearest indexed root containing `.fdsl_faiss`
+2. Loads `records.json` + `vectors.json`
+3. Auto-rebuilds vectors when legacy/incompatible metadata is detected
+4. Filters records to files under the target directory (`recursive` aware)
+5. Scores each chunk by dot-product similarity
+6. Returns top-k chunks with file path + page metadata
 
 ---
 

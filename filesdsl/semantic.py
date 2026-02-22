@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import math
@@ -20,7 +21,9 @@ SEMANTIC_DB_DIRNAME = ".fdsl_faiss"
 SEMANTIC_INDEX_FILENAME = "pages.faiss"
 SEMANTIC_RECORDS_FILENAME = "records.json"
 SEMANTIC_VECTORS_FILENAME = "vectors.json"
+SEMANTIC_META_FILENAME = "meta.json"
 EMBEDDING_DIM = 256
+EMBEDDING_VERSION = "stable_hash_v1"
 
 
 def _check_budget(budget: ExecutionBudget | None, phase: str) -> None:
@@ -117,6 +120,176 @@ def semantic_search_file_pages(
 
     scored_pages.sort(key=lambda item: item[0], reverse=True)
     return [page for _, page in scored_pages[:top_k]]
+
+
+def semantic_search_file_chunks(
+    file_path: Path,
+    query: str,
+    top_k: int,
+    *,
+    display_root: Path | None = None,
+    budget: ExecutionBudget | None = None,
+) -> list[tuple[int, str]]:
+    if not isinstance(query, str) or query.strip() == "":
+        raise DSLRuntimeError("query must be a non-empty string")
+    if not isinstance(top_k, int) or top_k < 1:
+        raise DSLRuntimeError("top_k must be a positive integer")
+
+    resolved_file_path = file_path.resolve()
+    indexed_root = _find_indexed_root(
+        resolved_file_path,
+        display_root=display_root,
+        budget=budget,
+    )
+    relative_path = resolved_file_path.relative_to(indexed_root).as_posix()
+    db_path = indexed_root / SEMANTIC_DB_DIRNAME
+    vectors = _load_vectors(db_path, budget=budget)
+    records = _load_records(db_path)
+    query_vector = _encode_texts([query.strip()], budget=budget)[0]
+
+    scored_chunks: list[tuple[float, int, str]] = []
+    for record_index, record in enumerate(records):
+        _check_budget(budget, "semantic.search.record")
+        if record_index >= len(vectors):
+            continue
+        record_relative_path = record.get("relative_path")
+        if not isinstance(record_relative_path, str) or record_relative_path != relative_path:
+            continue
+
+        page = record.get("page")
+        if not isinstance(page, int):
+            continue
+
+        score = _dot(query_vector, vectors[record_index])
+        scored_chunks.append((score, page, str(record.get("text", ""))))
+
+    scored_chunks.sort(key=lambda item: (-item[0], item[1]))
+    return [(page, text) for _, page, text in scored_chunks[:top_k]]
+
+
+def semantic_search_directory_chunks(
+    directory_path: Path,
+    query: str,
+    top_k: int,
+    recursive: bool,
+    *,
+    display_root: Path | None = None,
+    budget: ExecutionBudget | None = None,
+) -> list[tuple[Path, int, str]]:
+    if not isinstance(query, str) or query.strip() == "":
+        raise DSLRuntimeError("query must be a non-empty string")
+    if not isinstance(top_k, int) or top_k < 1:
+        raise DSLRuntimeError("top_k must be a positive integer")
+    if not isinstance(recursive, bool):
+        raise DSLRuntimeError("recursive must be a boolean")
+
+    resolved_dir = directory_path.resolve()
+    indexed_root = _find_indexed_root(
+        resolved_dir,
+        display_root=display_root,
+        budget=budget,
+    )
+    db_path = indexed_root / SEMANTIC_DB_DIRNAME
+    vectors = _load_vectors(db_path, budget=budget)
+    records = _load_records(db_path)
+    query_vector = _encode_texts([query.strip()], budget=budget)[0]
+
+    rel_dir = resolved_dir.relative_to(indexed_root).as_posix()
+    if rel_dir == ".":
+        rel_dir = ""
+
+    scored_chunks: list[tuple[float, str, int, str]] = []
+    for record_index, record in enumerate(records):
+        _check_budget(budget, "semantic.directory_search.record")
+        if record_index >= len(vectors):
+            continue
+
+        rel_path = record.get("relative_path")
+        if not isinstance(rel_path, str):
+            continue
+        rel_parent = str(Path(rel_path).parent.as_posix())
+        if rel_parent == ".":
+            rel_parent = ""
+
+        if recursive:
+            if rel_dir and not rel_path.startswith(f"{rel_dir}/"):
+                continue
+        elif rel_parent != rel_dir:
+            continue
+
+        page = record.get("page")
+        if not isinstance(page, int):
+            continue
+
+        score = _dot(query_vector, vectors[record_index])
+        scored_chunks.append((score, rel_path, page, str(record.get("text", ""))))
+
+    scored_chunks.sort(key=lambda item: (-item[0], item[1], item[2]))
+    return [
+        (indexed_root / rel_path, page, text)
+        for _, rel_path, page, text in scored_chunks[:top_k]
+    ]
+
+
+def semantic_search_directory_files(
+    directory_path: Path,
+    query: str,
+    top_k: int,
+    recursive: bool,
+    *,
+    display_root: Path | None = None,
+    budget: ExecutionBudget | None = None,
+) -> list[Path]:
+    if not isinstance(query, str) or query.strip() == "":
+        raise DSLRuntimeError("query must be a non-empty string")
+    if not isinstance(top_k, int) or top_k < 1:
+        raise DSLRuntimeError("top_k must be a positive integer")
+    if not isinstance(recursive, bool):
+        raise DSLRuntimeError("recursive must be a boolean")
+
+    resolved_dir = directory_path.resolve()
+    indexed_root = _find_indexed_root(
+        resolved_dir,
+        display_root=display_root,
+        budget=budget,
+    )
+    db_path = indexed_root / SEMANTIC_DB_DIRNAME
+    vectors = _load_vectors(db_path, budget=budget)
+    _, record_positions = _load_record_indexes(db_path, budget=budget)
+    query_vector = _encode_texts([query.strip()], budget=budget)[0]
+
+    rel_dir = resolved_dir.relative_to(indexed_root).as_posix()
+    if rel_dir == ".":
+        rel_dir = ""
+
+    scored_paths: list[tuple[float, Path]] = []
+    for rel_path, positions in record_positions.items():
+        _check_budget(budget, "semantic.directory_search.file")
+        rel_parent = str(Path(rel_path).parent.as_posix())
+        if rel_parent == ".":
+            rel_parent = ""
+
+        if recursive:
+            if rel_dir and not rel_path.startswith(f"{rel_dir}/"):
+                continue
+        elif rel_parent != rel_dir:
+            continue
+
+        best_score: float | None = None
+        for vector_index, _ in positions:
+            _check_budget(budget, "semantic.directory_search.record")
+            if vector_index >= len(vectors):
+                continue
+            score = _dot(query_vector, vectors[vector_index])
+            if best_score is None or score > best_score:
+                best_score = score
+
+        if best_score is None:
+            continue
+        scored_paths.append((best_score, indexed_root / rel_path))
+
+    scored_paths.sort(key=lambda item: (-item[0], item[1].as_posix()))
+    return [path for _, path in scored_paths[:top_k]]
 
 
 def get_file_pages_from_database(
@@ -380,6 +553,7 @@ def _write_faiss_database(
     vectors = _encode_texts(embedding_inputs, budget=budget)
     (db_path / SEMANTIC_RECORDS_FILENAME).write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
     (db_path / SEMANTIC_VECTORS_FILENAME).write_text(json.dumps(vectors), encoding="utf-8")
+    _write_embedding_meta(db_path)
     # Marker file to make the storage explicitly faiss-backed for callers.
     (db_path / SEMANTIC_INDEX_FILENAME).write_text("faiss-index-placeholder", encoding="utf-8")
 
@@ -398,6 +572,7 @@ def _load_records(db_path: Path) -> list[dict[str, str | int]]:
 
 
 def _load_vectors(db_path: Path, *, budget: ExecutionBudget | None = None) -> list[list[float]]:
+    _ensure_vectors_compatible(db_path, budget=budget)
     vectors_path = db_path / SEMANTIC_VECTORS_FILENAME
     if not vectors_path.is_file():
         raise DSLRuntimeError("No prepared semantic index collection found. Run 'uv run fdsl prepare <folder>' first.")
@@ -411,6 +586,93 @@ def _load_vectors(db_path: Path, *, budget: ExecutionBudget | None = None) -> li
 def _cache_key(path: Path) -> tuple[str, int, int]:
     stats = path.stat()
     return (path.as_posix(), stats.st_mtime_ns, stats.st_size)
+
+
+def _current_embedding_meta() -> dict[str, str | int]:
+    return {
+        "embedding_version": EMBEDDING_VERSION,
+        "embedding_dim": EMBEDDING_DIM,
+    }
+
+
+def _write_embedding_meta(db_path: Path) -> None:
+    meta_path = db_path / SEMANTIC_META_FILENAME
+    meta_path.write_text(json.dumps(_current_embedding_meta()), encoding="utf-8")
+
+
+def _load_embedding_meta(db_path: Path) -> dict[str, str | int] | None:
+    meta_path = db_path / SEMANTIC_META_FILENAME
+    if not meta_path.is_file():
+        return None
+    try:
+        raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    parsed: dict[str, str | int] = {}
+    for key, value in raw.items():
+        if isinstance(key, str) and isinstance(value, (str, int)):
+            parsed[key] = value
+    return parsed
+
+
+def _is_embedding_meta_current(meta: dict[str, str | int] | None) -> bool:
+    if meta is None:
+        return False
+    if meta.get("embedding_version") != EMBEDDING_VERSION:
+        return False
+    if meta.get("embedding_dim") != EMBEDDING_DIM:
+        return False
+    return True
+
+
+def _embedding_input_from_record(record: dict[str, str | int]) -> str:
+    relative_path = record.get("relative_path")
+    if not isinstance(relative_path, str):
+        relative_path = ""
+    text = str(record.get("text", ""))
+    return f"File: {relative_path}\n{text}" if text else f"File: {relative_path}"
+
+
+def _rebuild_vectors_from_records(db_path: Path, *, budget: ExecutionBudget | None = None) -> None:
+    records = _load_records(db_path)
+    embedding_inputs: list[str] = []
+    for record in records:
+        _check_budget(budget, "semantic.rebuild_vectors.record")
+        embedding_inputs.append(_embedding_input_from_record(record))
+    vectors = _encode_texts(embedding_inputs, budget=budget)
+    vectors_path = db_path / SEMANTIC_VECTORS_FILENAME
+    vectors_path.write_text(json.dumps(vectors), encoding="utf-8")
+    _write_embedding_meta(db_path)
+    _load_vectors_cached.cache_clear()
+
+
+def _ensure_vectors_compatible(db_path: Path, *, budget: ExecutionBudget | None = None) -> None:
+    records_path = db_path / SEMANTIC_RECORDS_FILENAME
+    if not records_path.is_file():
+        return
+
+    vectors_path = db_path / SEMANTIC_VECTORS_FILENAME
+    if not vectors_path.is_file():
+        _rebuild_vectors_from_records(db_path, budget=budget)
+        return
+
+    meta = _load_embedding_meta(db_path)
+    if not _is_embedding_meta_current(meta):
+        _rebuild_vectors_from_records(db_path, budget=budget)
+        return
+
+    try:
+        vectors = _load_vectors_cached(*_cache_key(vectors_path))
+    except Exception:
+        _rebuild_vectors_from_records(db_path, budget=budget)
+        return
+
+    records = _load_records(db_path)
+    if len(vectors) != len(records):
+        _rebuild_vectors_from_records(db_path, budget=budget)
+        return
 
 
 @lru_cache(maxsize=8)
@@ -490,6 +752,7 @@ def _load_record_indexes_cached(
 
 
 def _encode_texts(texts: list[str], *, budget: ExecutionBudget | None = None) -> list[list[float]]:
+    token_bucket_cache: dict[str, int] = {}
     vectors: list[list[float]] = []
     for text in texts:
         _check_budget(budget, "semantic.encode.text")
@@ -497,12 +760,21 @@ def _encode_texts(texts: list[str], *, budget: ExecutionBudget | None = None) ->
         for token_index, token in enumerate(re.findall(r"\w+", text.lower())):
             if token_index % 128 == 0:
                 _check_budget(budget, "semantic.encode.token")
-            vec[hash(token) % EMBEDDING_DIM] += 1.0
+            bucket = token_bucket_cache.get(token)
+            if bucket is None:
+                bucket = _stable_bucket_index(token)
+                token_bucket_cache[token] = bucket
+            vec[bucket] += 1.0
         norm = math.sqrt(sum(v * v for v in vec))
         if norm > 0:
             vec = [v / norm for v in vec]
         vectors.append(vec)
     return vectors
+
+
+def _stable_bucket_index(token: str) -> int:
+    digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big") % EMBEDDING_DIM
 
 
 def _dot(a: list[float], b: list[float]) -> float:

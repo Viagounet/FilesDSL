@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from filesdsl.interpreter import run_script
-from filesdsl.semantic import prepare_semantic_database
+from filesdsl.semantic import (
+    SEMANTIC_DB_DIRNAME,
+    SEMANTIC_META_FILENAME,
+    SEMANTIC_VECTORS_FILENAME,
+    prepare_semantic_database,
+)
 
 
 class PrepareFaissIntegrationTests(unittest.TestCase):
@@ -31,23 +37,39 @@ root = Directory('.')
 all_files = root.search('sample|notes', scope='name')
 count = len(all_files)
 tree_text = root.tree(max_depth=4)
+semantic_chunks = root.semantic_search('alpha', top_k=2)
 notes = File('notes.txt')
 has_alpha = notes.contains('alpha')
 alpha_pages = notes.search('alpha')
-semantic_pages = notes.semantic_search('alpha', top_k=1)
+semantic_chunks_file = notes.semantic_search('alpha', top_k=1)
 head_text = notes.head()
 '''
             variables = run_script(script, cwd=work, sandbox_root=work)
             self.assertGreaterEqual(variables['count'], 1)
             self.assertTrue(variables['has_alpha'])
             self.assertEqual(variables['alpha_pages'], [1])
-            self.assertEqual(variables['semantic_pages'], [1])
+            self.assertEqual(len(variables['semantic_chunks_file']), 1)
+            self.assertTrue(variables['semantic_chunks_file'][0].startswith('[notes.txt] => [p.1]'))
             self.assertIn('alpha', variables['head_text'])
             self.assertEqual(variables['tree_text'].splitlines()[0], './')
             self.assertIn('sample.pdf', variables['tree_text'])
             self.assertIn('sample.docx', variables['tree_text'])
             self.assertIn('sample.pptx', variables['tree_text'])
             self.assertNotIn('.fdsl_faiss/', variables['tree_text'])
+            semantic_chunks = variables['semantic_chunks']
+            self.assertEqual(len(semantic_chunks), 2)
+            expected = {
+                'notes.txt',
+                'sample.pdf',
+                'sample.docx',
+                'sample.pptx',
+                'another_folder/nested_note.txt',
+            }
+            for chunk in semantic_chunks:
+                self.assertTrue(chunk.startswith('['))
+                self.assertIn('] => [p.', chunk)
+                file_path = chunk[1:].split('] => [p.', 1)[0]
+                self.assertIn(file_path, expected)
 
     def test_db_backed_subdirectory_works_when_folder_missing_on_disk(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -70,12 +92,50 @@ count = len(sub)
 tree_text = sub.tree(max_depth=3)
 matches = sub.search('nested_note\\.txt$', scope='name')
 match_count = len(matches)
+semantic_hits = sub.semantic_search('nested', top_k=3)
+semantic_hit_count = len(semantic_hits)
 '''
             variables = run_script(script, cwd=work, sandbox_root=work)
             self.assertGreaterEqual(variables['count'], 1)
             self.assertEqual(variables['match_count'], 1)
+            self.assertEqual(variables['semantic_hit_count'], 1)
+            self.assertEqual(
+                variables['semantic_hits'],
+                ['[another_folder/nested_note.txt] => [p.1] nested alpha note'],
+            )
             self.assertEqual(variables['tree_text'].splitlines()[0], 'another_folder/')
             self.assertIn('nested_note.txt', variables['tree_text'])
+
+    def test_legacy_vectors_are_rebuilt_automatically(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            work = Path(temp_dir) / 'data'
+            work.mkdir(parents=True, exist_ok=True)
+            (work / 'a.txt').write_text('alpha alpha alpha\n', encoding='utf-8')
+            (work / 'b.txt').write_text('zebra quantum zebra\n', encoding='utf-8')
+
+            prepare_semantic_database(work)
+
+            db_path = work / SEMANTIC_DB_DIRNAME
+            meta_path = db_path / SEMANTIC_META_FILENAME
+            if meta_path.exists():
+                meta_path.unlink()
+
+            vectors_path = db_path / SEMANTIC_VECTORS_FILENAME
+            original_vectors = json.loads(vectors_path.read_text(encoding='utf-8'))
+            poisoned = [[0.0] * len(original_vectors[0]) for _ in original_vectors]
+            vectors_path.write_text(json.dumps(poisoned), encoding='utf-8')
+
+            script = '''
+docs = Directory('.')
+hits = docs.semantic_search('zebra quantum', top_k=1)
+'''
+            variables = run_script(script, cwd=work, sandbox_root=work)
+            self.assertEqual(len(variables['hits']), 1)
+            self.assertTrue(variables['hits'][0].startswith('[b.txt] => [p.1]'))
+            self.assertTrue(meta_path.is_file())
+
+            rebuilt_vectors = json.loads(vectors_path.read_text(encoding='utf-8'))
+            self.assertTrue(any(any(value != 0.0 for value in vector) for vector in rebuilt_vectors))
 
     def _create_fixture_documents(self, root: Path) -> None:
         (root / 'notes.txt').write_text('alpha line\nbeta line\n', encoding='utf-8')

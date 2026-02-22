@@ -74,6 +74,12 @@ Membership examples:
     ignore_case=false
   ) -> list[file]
 
+- semantic_search(
+    query,
+    top_k=5,
+    recursive=None
+  ) -> list[string]
+
 - tree(max_depth=5, max_entries=500) -> string
   Returns an indented directory/file tree.
   Directories end with `/`.
@@ -86,6 +92,7 @@ Notes:
 - scope="name" searches file names/relative paths.
 - scope="content" searches file contents.
 - scope="both" matches either name or content.
+- semantic_search requires a prepared semantic index (`fdsl prepare <folder>`).
 - recursive=None means "use the directory object's recursive setting".
 
 8) File object API
@@ -122,8 +129,8 @@ Notes:
   ) -> list[string]
   Returns short match excerpts.
 
-- semantic_search(query, top_k=5) -> list[int]
-  Returns top-k most similar page/chunk numbers for this file,
+- semantic_search(query, top_k=5) -> list[string]
+  Returns top-k most similar chunks for this file,
   using a prepared semantic index (`fdsl prepare <folder>`).
 
 - table(max_items=50) -> string
@@ -140,6 +147,7 @@ Notes:
 - File(path)  # required argument, no optional defaults
 - dir.files(recursive=None)
 - dir.search(..., scope="name", in_content=false, recursive=None, ignore_case=false)
+- dir.semantic_search(query, top_k=5, recursive=None)
 - dir.tree(max_depth=5, max_entries=500)
 - file.read(pages=None)
 - file.search(..., ignore_case=false)

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
+import os
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -36,6 +39,28 @@ class FilesDSLTests(unittest.TestCase):
             for value, output in enumerate(outputs):
                 expected = f"start {value}\n[1, 2, 3]\nend {value}\n"
                 self.assertEqual(output, expected)
+
+    def test_semantic_encoder_is_stable_across_hash_seeds(self) -> None:
+        code = (
+            "import json\n"
+            "from filesdsl.semantic import _encode_texts\n"
+            "vec = _encode_texts(['alpha beta gamma'])[0]\n"
+            "non_zero = [i for i, value in enumerate(vec) if value]\n"
+            "print(json.dumps(non_zero))\n"
+        )
+        outputs: list[str] = []
+        for seed in ("1", "2"):
+            env = os.environ.copy()
+            env["PYTHONHASHSEED"] = seed
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            outputs.append(result.stdout.strip())
+        self.assertEqual(outputs[0], outputs[1])
 
     def test_run_script_writes_prints_to_given_stdout(self) -> None:
         root = Path.cwd()
@@ -251,10 +276,19 @@ pages = f.read(pages=[1])
 f = File("single.txt")
 hits = f.semantic_search("alpha", top_k=2)
 """
-            with patch("filesdsl.semantic.semantic_search_file_pages", return_value=[2, 1]) as search_mock:
+            with patch(
+                "filesdsl.semantic.semantic_search_file_chunks",
+                return_value=[(2, "chunk beta"), (1, "chunk alpha")],
+            ) as search_mock:
                 variables = run_script(script, cwd=root, sandbox_root=root)
 
-            self.assertEqual(variables["hits"], [2, 1])
+            self.assertEqual(
+                variables["hits"],
+                [
+                    "[single.txt] => [p.2] chunk beta",
+                    "[single.txt] => [p.1] chunk alpha",
+                ],
+            )
             search_mock.assert_called_once()
 
     def test_semantic_search_rejects_invalid_top_k(self) -> None:
@@ -267,6 +301,61 @@ hits = f.semantic_search("alpha", top_k=0)
 """
             with self.assertRaises(DSLRuntimeError):
                 run_script(script, cwd=root, sandbox_root=root)
+
+    def test_semantic_search_directory_method(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "a.txt").write_text("alpha\n", encoding="utf-8")
+            (root / "nested").mkdir()
+            (root / "nested" / "b.txt").write_text("beta\n", encoding="utf-8")
+            script = """
+docs = Directory(".")
+hits = docs.semantic_search("alpha", top_k=2)
+"""
+            mocked_chunks = [
+                (root / "nested" / "b.txt", 3, "beta chunk"),
+                (root / "a.txt", 1, "alpha chunk"),
+            ]
+            with patch(
+                "filesdsl.semantic.semantic_search_directory_chunks",
+                return_value=mocked_chunks,
+            ) as search_mock:
+                variables = run_script(script, cwd=root, sandbox_root=root)
+
+            self.assertEqual(
+                variables["hits"],
+                [
+                    "[nested/b.txt] => [p.3] beta chunk",
+                    "[a.txt] => [p.1] alpha chunk",
+                ],
+            )
+            self.assertEqual(len(variables["hits"]), 2)
+            search_mock.assert_called_once()
+
+    def test_semantic_search_directory_rejects_invalid_args(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "a.txt").write_text("alpha\n", encoding="utf-8")
+
+            with self.assertRaises(DSLRuntimeError):
+                run_script(
+                    """
+docs = Directory(".")
+hits = docs.semantic_search("alpha", top_k=0)
+""",
+                    cwd=root,
+                    sandbox_root=root,
+                )
+
+            with self.assertRaises(DSLRuntimeError):
+                run_script(
+                    """
+docs = Directory(".")
+hits = docs.semantic_search("alpha", recursive="yes")
+""",
+                    cwd=root,
+                    sandbox_root=root,
+                )
 
     def test_printed_paths_are_relative_to_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
